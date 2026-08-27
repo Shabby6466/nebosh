@@ -1,0 +1,169 @@
+:root {
+  color-scheme: light;
+  --bg: #f4f6f8;
+  --card: #ffffff;
+  --border: #dde2e7;
+  --text: #1b2430;
+  --muted: #64707d;
+  --accent: #1f5eff;
+  --good: #1e8a5f;
+  --bad: #c73b3b;
+  --neutral: #8a8f98;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app-shell { min-height: 100vh; }
+
+.nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 28px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand { font-weight: 600; }
+
+.nav-links a {
+  margin-left: 20px;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 14px;
+}
+.nav-links a:hover { color: var(--accent); }
+
+main {
+  display: flex;
+  justify-content: center;
+  padding: 32px 16px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px;
+  width: 420px;
+  max-width: 100%;
+}
+
+.card.wide { width: 900px; }
+
+h1 { font-size: 20px; margin: 0 0 4px; }
+h3 { font-size: 15px; margin: 20px 0 8px; }
+.muted { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+
+.form { display: flex; flex-direction: column; gap: 14px; }
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+label.block { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+
+input {
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+button {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.link { background: none; color: var(--accent); padding: 4px 0; }
+button.active { background: #16223f; }
+
+.error { color: var(--bad); font-size: 13px; }
+
+.camera-block {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.video-preview {
+  width: 100%;
+  border-radius: 10px;
+  background: #000;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.thumb {
+  width: 160px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.kv { list-style: none; padding: 0; margin: 0 0 16px; }
+.kv li { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.kv li span:first-child { color: var(--muted); }
+
+.badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  text-transform: capitalize;
+  align-self: flex-start;
+}
+.badge-good { background: #e3f5ec; color: var(--good); }
+.badge-bad { background: #fbe7e7; color: var(--bad); }
+.badge-neutral { background: #eef0f2; color: var(--neutral); }
+
+.session-live {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.status-panel { display: flex; flex-direction: column; }
+
+.log { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+.log li { padding: 6px 0; border-bottom: 1px solid var(--border); }
+
+.tabs { display: flex; gap: 8px; align-items: center; margin-bottom: 20px; }
+.tabs button { background: var(--neutral); }
+.tabs button.active { background: var(--accent); }
+
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
+tr.clickable { cursor: pointer; }
+tr.clickable:hover { background: var(--bg); }
+.flag-count { color: var(--bad); font-weight: 600; }
+
+.violation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+.violation-card { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.violation-card img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; }
+.violation-meta { padding: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.review-actions { display: flex; gap: 6px; margin-top: 4px; }
+.review-actions button { flex: 1; padding: 6px 8px; font-size: 12px; }
+.review-actions button:last-child { background: var(--bad); }

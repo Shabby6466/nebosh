@@ -1,0 +1,34 @@
+# --- Python / backend ---
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.egg-info/
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+
+# Downloaded/exported ML weights — large binaries, regenerate via scripts/gen_stub_models.py
+backend/yolov8n.pt
+backend/app/ml_models/*.onnx
+
+# Env files with secrets/credentials
+backend/.env
+frontend/.env
+
+# --- Node / frontend ---
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# --- Docker / data volumes (bind-mounted or named, shouldn't be versioned) ---
+pgdata/
+minio-data/
+
+# --- OS / editor cruft ---
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# --- Logs ---
+*.log
