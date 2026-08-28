@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,21 @@ async def create_candidate(payload: CandidateCreate, db: AsyncSession = Depends(
     db.add(candidate)
     await db.commit()
     await db.refresh(candidate)
+    return candidate
+
+
+@router.get("/candidates/lookup", response_model=CandidateOut)
+async def lookup_candidate(email: str = Query(...), db: AsyncSession = Depends(get_db)):
+    """Lets a returning candidate resume their flow without a saved link.
+
+    NOTE: this is an MVP convenience, not an auth mechanism — anyone who knows
+    a candidate's email can pull their KYC status this way. Fine for a local
+    pilot; before a real rollout this should require an OTP/magic-link step.
+    """
+    result = await db.execute(select(Candidate).where(Candidate.email == email))
+    candidate = result.scalar_one_or_none()
+    if candidate is None:
+        raise HTTPException(404, "No candidate found with this email")
     return candidate
 
 

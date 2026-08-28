@@ -1,9 +1,12 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { createCandidate } from "../lib/api";
+import { useCandidateSession } from "../lib/candidateStore";
+import Stepper from "../components/Stepper";
 
 export default function Register() {
   const navigate = useNavigate();
+  const { setCandidate } = useCandidateSession();
   const [form, setForm] = useState({
     full_name: "",
     email: "",
@@ -23,6 +26,12 @@ export default function Register() {
     setError(null);
     try {
       const candidate = await createCandidate(form);
+      setCandidate({
+        id: candidate.id,
+        full_name: candidate.full_name,
+        email: candidate.email,
+        kyc_status: candidate.kyc_status,
+      });
       navigate(`/kyc/${candidate.id}`);
     } catch (err) {
       setError(axiosMessage(err));
@@ -33,20 +42,21 @@ export default function Register() {
 
   return (
     <div className="card">
+      <Stepper current={1} />
       <h1>Candidate Registration</h1>
-      <p className="muted">Step 1 of 2 — register, then complete ID + selfie verification.</p>
+      <p className="muted">Register once, then verify your identity to unlock your exam session.</p>
       <form onSubmit={submit} className="form">
         <label>
           Full name
-          <input required value={form.full_name} onChange={update("full_name")} />
+          <input required value={form.full_name} onChange={update("full_name")} placeholder="As shown on your ID" />
         </label>
         <label>
           Email
-          <input required type="email" value={form.email} onChange={update("email")} />
+          <input required type="email" value={form.email} onChange={update("email")} placeholder="you@example.com" />
         </label>
         <label>
           Phone
-          <input value={form.phone} onChange={update("phone")} />
+          <input value={form.phone} onChange={update("phone")} placeholder="Optional" />
         </label>
         <label>
           CNIC / Passport No.
@@ -54,13 +64,16 @@ export default function Register() {
         </label>
         <label>
           Exam booking reference
-          <input value={form.exam_booking_ref} onChange={update("exam_booking_ref")} />
+          <input value={form.exam_booking_ref} onChange={update("exam_booking_ref")} placeholder="Optional" />
         </label>
         {error && <p className="error">{error}</p>}
         <button type="submit" disabled={submitting}>
           {submitting ? "Registering…" : "Continue to verification"}
         </button>
       </form>
+      <p className="muted footnote">
+        Already registered? <Link to="/continue">Continue with your email</Link>
+      </p>
     </div>
   );
 }

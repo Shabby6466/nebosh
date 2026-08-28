@@ -60,6 +60,11 @@ export interface FrameEvalResult {
   processing_ms: number;
 }
 
+export async function lookupCandidateByEmail(email: string): Promise<Candidate> {
+  const { data } = await api.get<Candidate>("/api/v1/candidates/lookup", { params: { email } });
+  return data;
+}
+
 export async function createCandidate(payload: {
   full_name: string;
   email: string;

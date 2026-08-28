@@ -1,11 +1,16 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { submitKyc, type KYCResult } from "../lib/api";
 import { useCamera } from "../lib/useCamera";
+import { useCandidateSession } from "../lib/candidateStore";
+import Stepper from "../components/Stepper";
 import { axiosMessage } from "./Register";
 
 export default function Kyc() {
-  const { candidateId } = useParams<{ candidateId: string }>();
+  const { candidateId: paramId } = useParams<{ candidateId: string }>();
+  const { candidate, setCandidate } = useCandidateSession();
+  const candidateId = paramId ?? candidate?.id;
+
   const navigate = useNavigate();
   const { videoRef, start, captureFrame, ready, error: cameraError } = useCamera();
 
@@ -20,6 +25,10 @@ export default function Kyc() {
     start();
   }, [start]);
 
+  if (!candidateId) {
+    return <Navigate to="/" replace />;
+  }
+
   const captureSelfie = async () => {
     const blob = await captureFrame(720, 0.85);
     if (!blob) return;
@@ -28,12 +37,15 @@ export default function Kyc() {
   };
 
   const submit = async () => {
-    if (!candidateId || !idFile || !selfieBlob) return;
+    if (!idFile || !selfieBlob) return;
     setSubmitting(true);
     setError(null);
     try {
       const res = await submitKyc(candidateId, idFile, selfieBlob);
       setResult(res);
+      if (candidate) {
+        setCandidate({ ...candidate, kyc_status: res.verified ? "verified" : "rejected" });
+      }
     } catch (err) {
       setError(axiosMessage(err));
     } finally {
@@ -44,6 +56,7 @@ export default function Kyc() {
   if (result) {
     return (
       <div className="card">
+        <Stepper current={result.verified ? 3 : 2} />
         <h1>{result.verified ? "Verification passed" : "Verification failed"}</h1>
         <ul className="kv">
           <li><span>Match score</span><span>{result.match_score.toFixed(3)}</span></li>
@@ -62,8 +75,9 @@ export default function Kyc() {
 
   return (
     <div className="card">
+      <Stepper current={2} />
       <h1>Identity Verification (KYC)</h1>
-      <p className="muted">Step 2 of 2 — upload your government ID and capture a live selfie.</p>
+      <p className="muted">Upload your government ID and capture a live selfie — both are matched automatically.</p>
 
       <label className="block">
         Government ID / Passport (photo or scan)

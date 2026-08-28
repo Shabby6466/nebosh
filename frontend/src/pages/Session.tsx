@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 import { createSession, endSession, WS_BASE_URL, type FrameEvalResult } from "../lib/api";
 import { useCamera } from "../lib/useCamera";
+import { useCandidateSession } from "../lib/candidateStore";
+import Stepper from "../components/Stepper";
 import { axiosMessage } from "./Register";
 
 const CAPTURE_INTERVAL_MS = 7000;
@@ -11,7 +13,9 @@ interface LogEntry extends FrameEvalResult {
 }
 
 export default function Session() {
-  const { candidateId } = useParams<{ candidateId: string }>();
+  const { candidateId: paramId } = useParams<{ candidateId: string }>();
+  const { candidate } = useCandidateSession();
+  const candidateId = paramId ?? candidate?.id;
   const { videoRef, start, captureFrame, ready } = useCamera();
 
   const [examCode, setExamCode] = useState("NEBOSH-IGC1");
@@ -82,8 +86,16 @@ export default function Session() {
 
   const live = status === "starting" || status === "active";
 
+  if (!candidateId) {
+    return <Navigate to="/" replace />;
+  }
+  if (candidate && candidate.kyc_status !== "verified") {
+    return <Navigate to={`/kyc/${candidateId}`} replace />;
+  }
+
   return (
     <div className="card wide">
+      <Stepper current={3} />
       <h1>Exam Session</h1>
 
       <div className={live ? "session-live" : "form"}>
@@ -137,7 +149,12 @@ export default function Session() {
         )}
       </div>
 
-      {status === "ended" && <p>Session ended. Thank you.</p>}
+      {status === "ended" && (
+        <div className="ended-panel">
+          <p>Session ended. Thank you — your exam has been submitted for review.</p>
+          <Link to="/">Back to home</Link>
+        </div>
+      )}
     </div>
   );
 }

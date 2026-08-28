@@ -31,15 +31,26 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-.brand { font-weight: 600; }
+.brand { font-weight: 600; color: var(--text); text-decoration: none; }
+
+.nav-links { display: flex; align-items: center; gap: 20px; }
 
 .nav-links a {
-  margin-left: 20px;
   color: var(--text);
   text-decoration: none;
   font-size: 14px;
 }
 .nav-links a:hover { color: var(--accent); }
+
+.nav-links button.link {
+  font-size: 14px;
+  padding: 0;
+}
+
+.nav-greeting {
+  font-size: 14px;
+  color: var(--muted);
+}
 
 main {
   display: flex;
@@ -61,6 +72,52 @@ main {
 h1 { font-size: 20px; margin: 0 0 4px; }
 h3 { font-size: 15px; margin: 20px 0 8px; }
 .muted { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+.footnote { margin: 20px 0 0; text-align: center; }
+.footnote a { color: var(--accent); }
+
+/* --- Stepper --- */
+.stepper {
+  list-style: none;
+  display: flex;
+  padding: 0;
+  margin: 0 0 24px;
+}
+.step {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  gap: 8px;
+}
+.step:last-child { flex: 0; }
+.step-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.step-active .step-dot { background: var(--accent); border-color: var(--accent); color: #fff; }
+.step-done .step-dot { background: var(--good); border-color: var(--good); color: #fff; }
+.step-label {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.step-active .step-label, .step-done .step-label { color: var(--text); }
+.step-connector {
+  height: 1px;
+  background: var(--border);
+  flex: 1;
+  margin: 0 4px;
+}
+.step-done .step-connector { background: var(--good); }
 
 .form { display: flex; flex-direction: column; gap: 14px; }
 
@@ -146,9 +203,43 @@ button.active { background: #16223f; }
 .log { list-style: none; padding: 0; margin: 0; font-size: 13px; }
 .log li { padding: 6px 0; border-bottom: 1px solid var(--border); }
 
-.tabs { display: flex; gap: 8px; align-items: center; margin-bottom: 20px; }
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+.dashboard-header .muted { margin: 0; }
+
+.tabs { display: flex; gap: 8px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
 .tabs button { background: var(--neutral); }
 .tabs button.active { background: var(--accent); }
+.tab-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
+  font-size: 11px;
+}
+
+.search {
+  margin-left: auto;
+  min-width: 240px;
+}
+
+.empty-state {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.ended-panel {
+  text-align: center;
+  padding: 20px 0;
+}
+.ended-panel a { color: var(--accent); display: inline-block; margin-top: 8px; }
 
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
