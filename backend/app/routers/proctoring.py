@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.database import SessionLocal, get_db
 from app.models import ExamSession, FaceEmbedding, SessionFrame, Violation
-from app.schemas import FrameEvalResult
+from app.schemas import ClientEventCreate, FrameEvalResult
 from app.services.face_service import MultipleFacesDetected, NoFaceDetected, face_service
 from app.services.person_detector import person_detector
 from app.services.storage import upload_image
@@ -96,7 +96,10 @@ async def evaluate_frame(
                 head_down     = pitch      < -settings.head_pitch_down_threshold
                 head_up       = pitch      >  settings.head_pitch_up_threshold
                 gaze_flicked_x = abs(gaze_x - 0.5) > settings.gaze_deviation_threshold
-                gaze_flicked_y = abs(gaze_y - 0.5) > settings.gaze_deviation_threshold
+                
+                # Y gaze neutral is ~0.35 (top eyelid covers iris), not 0.5. 
+                # So we check deviation from 0.35 instead of 0.5.
+                gaze_flicked_y = abs(gaze_y - 0.35) > settings.gaze_deviation_threshold
 
                 if head_turned or head_down or head_up or gaze_flicked_x or gaze_flicked_y:
                     violation_type = "looking_away"
@@ -186,6 +189,29 @@ async def evaluate_frame_rest(
 
     return await evaluate_frame(db, session, image_bgr, reference_embedding)
 
+
+@router.post("/api/v1/sessions/{session_id}/events")
+async def report_client_event(
+    session_id: uuid.UUID,
+    event: ClientEventCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Record client-side events like tab switching or window blur."""
+    session = await db.get(ExamSession, session_id)
+    if session is None or session.status != "active":
+        raise HTTPException(404, "Active session not found")
+
+    db.add(
+        Violation(
+            session_id=session.id,
+            candidate_id=session.candidate_id,
+            type=event.type,
+            confidence=event.confidence,
+            snapshot_s3_key="none",  # Client events don't have a snapshot initially
+        )
+    )
+    await db.commit()
+    return {"status": "recorded"}
 
 @router.websocket("/ws/v1/sessions/{session_id}")
 async def proctoring_ws(websocket: WebSocket, session_id: uuid.UUID):

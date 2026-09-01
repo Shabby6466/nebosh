@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
-import { createSession, endSession, WS_BASE_URL, type FrameEvalResult } from "../lib/api";
+import { createSession, endSession, reportSessionEvent, WS_BASE_URL, type FrameEvalResult } from "../lib/api";
 import { useCamera } from "../lib/useCamera";
 import { useCandidateSession } from "../lib/candidateStore";
 import Stepper from "../components/Stepper";
@@ -35,6 +35,35 @@ export default function Session() {
       if (intervalRef.current) window.clearInterval(intervalRef.current);
     };
   }, [start]);
+
+  useEffect(() => {
+    if (status !== "active" || !sessionId) return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        reportSessionEvent(sessionId, "tab_switched").catch(console.error);
+        setLog((prev) => [{ violation: "tab_switched", at: new Date().toLocaleTimeString() } as any, ...prev].slice(0, 20));
+      }
+    };
+
+    const handleBlur = () => {
+      // Small timeout to prevent false positives when browser dialogs open (like camera permissions)
+      setTimeout(() => {
+        if (!document.hasFocus()) {
+          reportSessionEvent(sessionId, "window_unfocused").catch(console.error);
+          setLog((prev) => [{ violation: "window_unfocused", at: new Date().toLocaleTimeString() } as any, ...prev].slice(0, 20));
+        }
+      }, 500);
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleBlur);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [status, sessionId]);
 
   const beginSession = async () => {
     if (!candidateId) return;

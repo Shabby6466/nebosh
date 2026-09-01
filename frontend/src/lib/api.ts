@@ -129,3 +129,13 @@ export async function reviewViolation(
     params: { review_status: reviewStatus, notes },
   });
 }
+
+export async function reportSessionEvent(
+  sessionId: string,
+  eventType: string,
+): Promise<void> {
+  await api.post(`/api/v1/sessions/${sessionId}/events`, {
+    type: eventType,
+    confidence: 1.0,
+  });
+}

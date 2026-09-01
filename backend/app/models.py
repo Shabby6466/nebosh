@@ -95,6 +95,8 @@ class Violation(Base):
             "liveness_failed",
             "looking_away",
             "connection_lost",
+            "tab_switched",
+            "window_unfocused",
             name="violation_type",
         )
     )

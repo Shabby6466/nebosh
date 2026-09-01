@@ -83,3 +83,8 @@ class ViolationOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ClientEventCreate(BaseModel):
+    type: str  # e.g., 'tab_switched', 'window_unfocused'
+    confidence: float = 1.0
