@@ -74,6 +74,10 @@ class SessionFrame(Base):
     face_match: Mapped[bool | None] = mapped_column(Boolean)
     face_similarity: Mapped[float | None] = mapped_column(Float)
     liveness_pass: Mapped[bool | None] = mapped_column(Boolean)
+    head_yaw: Mapped[float | None] = mapped_column(Float)
+    head_pitch: Mapped[float | None] = mapped_column(Float)
+    gaze_ratio_x: Mapped[float | None] = mapped_column(Float)
+    gaze_ratio_y: Mapped[float | None] = mapped_column(Float)
     processing_ms: Mapped[int | None] = mapped_column(Integer)
 
 
@@ -89,6 +93,7 @@ class Violation(Base):
             "multiple_people",
             "face_mismatch",
             "liveness_failed",
+            "looking_away",
             "connection_lost",
             name="violation_type",
         )

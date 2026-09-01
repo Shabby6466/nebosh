@@ -6,7 +6,7 @@ import { useCandidateSession } from "../lib/candidateStore";
 import Stepper from "../components/Stepper";
 import { axiosMessage } from "./Register";
 
-const CAPTURE_INTERVAL_MS = 7000;
+const CAPTURE_INTERVAL_MS = 2000;
 
 interface LogEntry extends FrameEvalResult {
   at: string;
@@ -128,6 +128,10 @@ export default function Session() {
               <li><span>Persons detected</span><span>{latest?.person_count ?? "—"}</span></li>
               <li><span>Face match</span><span>{latest?.face_match === null || latest?.face_match === undefined ? "—" : latest.face_match ? "yes" : "no"}</span></li>
               <li><span>Similarity</span><span>{latest?.face_similarity?.toFixed(3) ?? "—"}</span></li>
+              <li><span>Head yaw</span><span>{latest?.head_yaw != null ? `${latest.head_yaw}°` : "—"}</span></li>
+              <li><span>Head pitch</span><span>{latest?.head_pitch != null ? `${latest.head_pitch}°` : "—"}</span></li>
+              <li><span>Gaze X</span><span>{latest?.gaze_ratio_x != null ? latest.gaze_ratio_x.toFixed(3) : "—"}</span></li>
+              <li><span>Gaze Y</span><span>{latest?.gaze_ratio_y != null ? latest.gaze_ratio_y.toFixed(3) : "—"}</span></li>
               <li><span>Processing</span><span>{latest?.processing_ms ? `${latest.processing_ms}ms` : "—"}</span></li>
             </ul>
             {error && <p className="error">{error}</p>}

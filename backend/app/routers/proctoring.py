@@ -55,6 +55,10 @@ async def evaluate_frame(
     face_match: bool | None = None
     face_similarity: float | None = None
     liveness_pass: bool | None = None
+    head_yaw: float | None = None
+    head_pitch: float | None = None
+    gaze_ratio_x: float | None = None
+    gaze_ratio_y: float | None = None
     violation_type: str | None = None
     snapshot_needed = False
 
@@ -67,11 +71,37 @@ async def evaluate_frame(
     else:
         # Exactly one person — run face match against the enrolled reference
         try:
-            live_embedding = face_service.embed(image_bgr)
-            face_match, face_similarity = face_service.match(reference_embedding, live_embedding)
+            faces = face_service.get_faces(image_bgr)
+            if len(faces) == 0:
+                raise NoFaceDetected()
+            if len(faces) > 1:
+                raise MultipleFacesDetected()
+
+            face = faces[0]
+            emb = face.normed_embedding.astype("float32")
+            face_match, face_similarity = face_service.match(reference_embedding, emb)
+
             if not face_match:
                 violation_type = "face_mismatch"
                 snapshot_needed = True
+            else:
+                # Face confirmed — now check head pose and gaze
+                yaw, pitch, gaze_x, gaze_y = face_service.estimate_pose(face, image_bgr)
+                head_yaw = round(yaw, 1)
+                head_pitch = round(pitch, 1)
+                gaze_ratio_x = round(gaze_x, 3)
+                gaze_ratio_y = round(gaze_y, 3)
+
+                head_turned   = abs(yaw)   > settings.head_yaw_threshold
+                head_down     = pitch      < -settings.head_pitch_down_threshold
+                head_up       = pitch      >  settings.head_pitch_up_threshold
+                gaze_flicked_x = abs(gaze_x - 0.5) > settings.gaze_deviation_threshold
+                gaze_flicked_y = abs(gaze_y - 0.5) > settings.gaze_deviation_threshold
+
+                if head_turned or head_down or head_up or gaze_flicked_x or gaze_flicked_y:
+                    violation_type = "looking_away"
+                    snapshot_needed = True
+
         except MultipleFacesDetected:
             # InsightFace found more faces than YOLO counted (e.g. a photo/screen in background)
             violation_type = "multiple_people"
@@ -112,6 +142,10 @@ async def evaluate_frame(
             face_match=face_match,
             face_similarity=face_similarity,
             liveness_pass=liveness_pass,
+            head_yaw=head_yaw,
+            head_pitch=head_pitch,
+            gaze_ratio_x=gaze_ratio_x,
+            gaze_ratio_y=gaze_ratio_y,
             processing_ms=processing_ms,
         )
     )
@@ -122,6 +156,10 @@ async def evaluate_frame(
         face_match=face_match,
         face_similarity=face_similarity,
         liveness_pass=liveness_pass,
+        head_yaw=head_yaw,
+        head_pitch=head_pitch,
+        gaze_ratio_x=gaze_ratio_x,
+        gaze_ratio_y=gaze_ratio_y,
         violation=violation_type,
         processing_ms=processing_ms,
     )

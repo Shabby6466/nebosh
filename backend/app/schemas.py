@@ -64,6 +64,10 @@ class FrameEvalResult(BaseModel):
     face_match: bool | None
     face_similarity: float | None
     liveness_pass: bool | None
+    head_yaw: float | None = None
+    head_pitch: float | None = None
+    gaze_ratio_x: float | None = None
+    gaze_ratio_y: float | None = None
     violation: str | None = None
     processing_ms: int
 

@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     person_conf_threshold: float = 0.5
     violation_debounce_frames: int = 2   # consecutive positive frames before flagging
 
+    # Head-pose / gaze thresholds (degrees / ratio)
+    # yaw: left-right rotation  |  pitch: up-down tilt
+    head_yaw_threshold: float = 25.0        # |yaw| > this → looking away (left/right)
+    head_pitch_down_threshold: float = 20.0 # pitch < -this → looking down (notes)
+    head_pitch_up_threshold: float = 30.0   # pitch > +this → looking up  (ceiling)
+    gaze_deviation_threshold: float = 0.20  # |gaze_ratio - 0.5| > this → eyes flicked sideways
+
     max_frame_dim_px: int = 640
 
     class Config:

@@ -56,6 +56,10 @@ export interface FrameEvalResult {
   face_match: boolean | null;
   face_similarity: number | null;
   liveness_pass: boolean | null;
+  head_yaw: number | null;
+  head_pitch: number | null;
+  gaze_ratio_x: number | null;
+  gaze_ratio_y: number | null;
   violation: string | null;
   processing_ms: number;
 }
