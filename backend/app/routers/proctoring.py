@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.database import SessionLocal, get_db
 from app.models import ExamSession, FaceEmbedding, SessionFrame, Violation
 from app.schemas import FrameEvalResult
-from app.services.face_service import NoFaceDetected, face_service
+from app.services.face_service import MultipleFacesDetected, NoFaceDetected, face_service
 from app.services.person_detector import person_detector
 from app.services.storage import upload_image
 
@@ -72,6 +72,10 @@ async def evaluate_frame(
             if not face_match:
                 violation_type = "face_mismatch"
                 snapshot_needed = True
+        except MultipleFacesDetected:
+            # InsightFace found more faces than YOLO counted (e.g. a photo/screen in background)
+            violation_type = "multiple_people"
+            snapshot_needed = True
         except NoFaceDetected:
             # Person detected by YOLO but no clear face (e.g. facing away) — treat as missing
             violation_type = "candidate_missing"
