@@ -3,11 +3,12 @@ import { Link, useNavigate } from "react-router-dom";
 import { createCandidate } from "../lib/api";
 import { useCandidateSession } from "../lib/candidateStore";
 import Stepper from "../components/Stepper";
+import RegistrationForm, { type CandidateFormData } from "../components/RegistrationForm";
 
 export default function Register() {
   const navigate = useNavigate();
   const { setCandidate } = useCandidateSession();
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<CandidateFormData>({
     full_name: "",
     email: "",
     phone: "",
@@ -17,7 +18,7 @@ export default function Register() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const update = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
+  const update = (key: keyof CandidateFormData) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [key]: e.target.value }));
 
   const submit = async (e: React.FormEvent) => {
@@ -45,32 +46,13 @@ export default function Register() {
       <Stepper current={1} />
       <h1>Candidate Registration</h1>
       <p className="muted">Register once, then verify your identity to unlock your exam session.</p>
-      <form onSubmit={submit} className="form">
-        <label>
-          Full name
-          <input required value={form.full_name} onChange={update("full_name")} placeholder="As shown on your ID" />
-        </label>
-        <label>
-          Email
-          <input required type="email" value={form.email} onChange={update("email")} placeholder="you@example.com" />
-        </label>
-        <label>
-          Phone
-          <input value={form.phone} onChange={update("phone")} placeholder="Optional" />
-        </label>
-        <label>
-          CNIC / Passport No.
-          <input required value={form.cnic_or_passport_no} onChange={update("cnic_or_passport_no")} />
-        </label>
-        <label>
-          Exam booking reference
-          <input value={form.exam_booking_ref} onChange={update("exam_booking_ref")} placeholder="Optional" />
-        </label>
-        {error && <p className="error">{error}</p>}
-        <button type="submit" disabled={submitting}>
-          {submitting ? "Registering…" : "Continue to verification"}
-        </button>
-      </form>
+      <RegistrationForm
+        form={form}
+        onChange={update}
+        onSubmit={submit}
+        submitting={submitting}
+        error={error}
+      />
       <p className="muted footnote">
         Already registered? <Link to="/continue">Continue with your email</Link>
       </p>

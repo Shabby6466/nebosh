@@ -1,22 +1,23 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Navigate, useParams } from "react-router-dom";
 import { createSession, endSession, reportSessionEvent, WS_BASE_URL, type FrameEvalResult } from "../lib/api";
 import { useCamera } from "../lib/useCamera";
 import { useCandidateSession } from "../lib/candidateStore";
 import Stepper from "../components/Stepper";
+import CameraView from "../components/CameraView";
+import MetricsPanel from "../components/MetricsPanel";
+import FlagLog, { type LogEntry } from "../components/FlagLog";
+import SessionIdleForm from "../components/SessionIdleForm";
+import SessionEndedPanel from "../components/SessionEndedPanel";
 import { axiosMessage } from "./Register";
 
 const CAPTURE_INTERVAL_MS = 2000;
-
-interface LogEntry extends FrameEvalResult {
-  at: string;
-}
 
 export default function Session() {
   const { candidateId: paramId } = useParams<{ candidateId: string }>();
   const { candidate } = useCandidateSession();
   const candidateId = paramId ?? candidate?.id;
-  const { videoRef, start, captureFrame, ready } = useCamera();
+  const { videoRef, start, captureFrame, ready, error: cameraError } = useCamera();
 
   const [examCode, setExamCode] = useState("NEBOSH-IGC1");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -42,7 +43,7 @@ export default function Session() {
     const handleVisibilityChange = () => {
       if (document.hidden) {
         reportSessionEvent(sessionId, "tab_switched").catch(console.error);
-        setLog((prev) => [{ violation: "tab_switched", at: new Date().toLocaleTimeString() } as any, ...prev].slice(0, 20));
+        setLog((prev) => [{ violation: "tab_switched", at: new Date().toLocaleTimeString() }, ...prev].slice(0, 20));
       }
     };
 
@@ -51,7 +52,7 @@ export default function Session() {
       setTimeout(() => {
         if (!document.hasFocus()) {
           reportSessionEvent(sessionId, "window_unfocused").catch(console.error);
-          setLog((prev) => [{ violation: "window_unfocused", at: new Date().toLocaleTimeString() } as any, ...prev].slice(0, 20));
+          setLog((prev) => [{ violation: "window_unfocused", at: new Date().toLocaleTimeString() }, ...prev].slice(0, 20));
         }
       }, 500);
     };
@@ -128,66 +129,39 @@ export default function Session() {
       <h1>Exam Session</h1>
 
       <div className={live ? "session-live" : "form"}>
-        <div className="camera-block">
-          {/* Single persistent <video> across all statuses — remounting it would drop the
-              already-attached getUserMedia stream and leave the preview black. */}
-          <video ref={videoRef} className="video-preview" muted playsInline />
-          {live && (
-            <span className={`badge ${latest?.violation ? "badge-bad" : "badge-good"}`}>
-              {status === "starting" ? "Connecting…" : latest?.violation ? latest.violation.replaceAll("_", " ") : "Monitoring"}
-            </span>
-          )}
-        </div>
+        <CameraView
+          videoRef={videoRef}
+          showBadge={live}
+          status={status}
+          violation={latest?.violation}
+          cameraError={cameraError}
+        />
 
         {status === "idle" && (
-          <>
-            <label>
-              Exam code
-              <input value={examCode} onChange={(e) => setExamCode(e.target.value)} />
-            </label>
-            {error && <p className="error">{error}</p>}
-            <button onClick={beginSession} disabled={!ready}>Start proctored session</button>
-          </>
+          <SessionIdleForm
+            examCode={examCode}
+            onExamCodeChange={setExamCode}
+            onBeginSession={beginSession}
+            ready={ready}
+            error={error}
+          />
         )}
 
         {live && (
-          <div className="status-panel">
-            <ul className="kv">
-              <li><span>Session</span><span>{sessionId}</span></li>
-              <li><span>Persons detected</span><span>{latest?.person_count ?? "—"}</span></li>
-              <li><span>Face match</span><span>{latest?.face_match === null || latest?.face_match === undefined ? "—" : latest.face_match ? "yes" : "no"}</span></li>
-              <li><span>Similarity</span><span>{latest?.face_similarity?.toFixed(3) ?? "—"}</span></li>
-              <li><span>Head yaw</span><span>{latest?.head_yaw != null ? `${latest.head_yaw}°` : "—"}</span></li>
-              <li><span>Head pitch</span><span>{latest?.head_pitch != null ? `${latest.head_pitch}°` : "—"}</span></li>
-              <li><span>Gaze X</span><span>{latest?.gaze_ratio_x != null ? latest.gaze_ratio_x.toFixed(3) : "—"}</span></li>
-              <li><span>Gaze Y</span><span>{latest?.gaze_ratio_y != null ? latest.gaze_ratio_y.toFixed(3) : "—"}</span></li>
-              <li><span>Processing</span><span>{latest?.processing_ms ? `${latest.processing_ms}ms` : "—"}</span></li>
-            </ul>
-            {error && <p className="error">{error}</p>}
-            <button onClick={finishSession}>End session</button>
-
-            <h3>Flag log</h3>
-            {log.length === 0 ? (
-              <p className="muted">No violations flagged yet.</p>
-            ) : (
-              <ul className="log">
-                {log.map((entry, i) => (
-                  <li key={i}>
-                    <strong>{entry.at}</strong> — {entry.violation?.replaceAll("_", " ")}
-                  </li>
-                ))}
-              </ul>
-            )}
+          <div>
+            <MetricsPanel
+              sessionId={sessionId}
+              latest={latest}
+              error={error}
+              onFinishSession={finishSession}
+            />
+            <FlagLog log={log} />
           </div>
         )}
       </div>
 
-      {status === "ended" && (
-        <div className="ended-panel">
-          <p>Session ended. Thank you — your exam has been submitted for review.</p>
-          <Link to="/">Back to home</Link>
-        </div>
-      )}
+      {status === "ended" && <SessionEndedPanel />}
     </div>
   );
 }
+
