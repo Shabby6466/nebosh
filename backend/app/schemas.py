@@ -29,6 +29,8 @@ class KYCResult(BaseModel):
     match_score: float
     liveness_score: float
     liveness_passed: bool
+    hold_id_match_score: float
+    hold_id_match_passed: bool
     reason: str | None = None
 
 

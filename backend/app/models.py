@@ -23,6 +23,7 @@ class Candidate(Base):
     )
     id_document_s3_key: Mapped[str | None] = mapped_column(String)
     selfie_s3_key: Mapped[str | None] = mapped_column(String)
+    hold_id_s3_key: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

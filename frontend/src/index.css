@@ -306,6 +306,161 @@ h3 {
   background: var(--good);
 }
 
+/* --- KYC capture wizard (sub-steps within "Verify identity") --- */
+.substeps {
+  list-style: none;
+  display: flex;
+  padding: 0;
+  margin: 0 0 22px;
+  gap: 4px;
+}
+
+.substep {
+  flex: 1;
+}
+
+.substep-btn {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 6px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  min-height: auto;
+}
+
+.substep-btn:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.substep-btn:hover:not(:disabled) {
+  transform: none;
+  background: none;
+}
+
+.substep-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  color: var(--muted);
+  transition: all var(--duration-normal) var(--ease-expo);
+}
+
+.substep-active .substep-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.substep-done .substep-dot {
+  background: var(--good);
+  border-color: var(--good);
+  color: #fff;
+}
+
+.substep-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+  text-align: center;
+}
+
+.substep-active .substep-label,
+.substep-done .substep-label {
+  color: var(--text-heading);
+  font-weight: 600;
+}
+
+.capture-stage {
+  animation: fadeInCard var(--duration-fast) var(--ease-expo) ease-out;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 13.5px;
+  margin: 0 0 16px;
+  line-height: 1.55;
+}
+
+.hint-warn {
+  color: var(--text-heading);
+  background: var(--accent-light);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+}
+
+.camera-wrap {
+  margin-bottom: 14px;
+}
+
+.camera-wrap.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.capture-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.capture-actions button {
+  flex: 1;
+}
+
+button.ghost {
+  background: var(--neutral-bg);
+  color: var(--text-heading);
+}
+
+button.ghost:hover:not(:disabled) {
+  background: var(--neutral-border);
+}
+
+.review-grid {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.review-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.review-item .thumb {
+  width: 100%;
+  margin: 0;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.review-item .muted {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+
+.capture-stage > button {
+  width: 100%;
+}
+
 /* --- Forms & Inputs (Pill Geometry) --- */
 .form {
   display: flex;

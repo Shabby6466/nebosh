@@ -35,6 +35,16 @@ class MultipleFacesDetected(Exception):
     pass
 
 
+class UnexpectedFaceCount(Exception):
+    """Raised when a hold-ID-to-camera shot doesn't contain exactly the live
+    face + the face printed on the ID card (e.g. card not visible, or more
+    than one bystander in frame)."""
+
+    def __init__(self, count: int):
+        self.count = count
+        super().__init__(f"Expected exactly 2 faces (live + ID card), found {count}")
+
+
 class FaceService:
     def __init__(self) -> None:
         # buffalo_l bundles a RetinaFace detector + ArcFace recognizer (512-d embeddings)
@@ -59,6 +69,36 @@ class FaceService:
         if len(faces) > 1:
             raise MultipleFacesDetected("Multiple faces detected; expected exactly one")
         return faces[0]
+
+    def get_primary_face(self, image_bgr: np.ndarray):
+        """Detect faces and return the largest (closest-to-camera) one.
+
+        Used for the live selfie, where a candidate may still be holding
+        their ID card in frame (e.g. right before/after the hold-ID shot) —
+        a smaller, farther-away card photo shouldn't fail the capture.
+        """
+        faces = self.get_faces(image_bgr)
+        if len(faces) == 0:
+            raise NoFaceDetected("No face detected in image")
+        return max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+
+    def get_hold_id_faces(self, image_bgr: np.ndarray):
+        """Detect the two faces in a "hold your ID next to your face" shot.
+
+        Exactly two faces are expected: the candidate's live face and the
+        photo printed on the ID card. The live face is held close to the
+        camera and so reliably has the larger bounding box; the card photo
+        is smaller and farther away. Returns (live_face, id_card_face).
+        """
+        faces = self.get_faces(image_bgr)
+        if len(faces) != 2:
+            raise UnexpectedFaceCount(len(faces))
+        faces_by_area = sorted(
+            faces,
+            key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]),
+            reverse=True,
+        )
+        return faces_by_area[0], faces_by_area[1]
 
     # ------------------------------------------------------------------
     # Head-pose + gaze
@@ -190,9 +230,12 @@ class FaceService:
     def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
         return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-8))
 
-    def match(self, embedding_a: np.ndarray, embedding_b: np.ndarray) -> tuple[bool, float]:
+    def match(
+        self, embedding_a: np.ndarray, embedding_b: np.ndarray, threshold: float | None = None
+    ) -> tuple[bool, float]:
         score = self.cosine_similarity(embedding_a, embedding_b)
-        return score >= settings.face_match_threshold, score
+        cutoff = settings.face_match_threshold if threshold is None else threshold
+        return score >= cutoff, score
 
     def check_liveness(self, face_crop_bgr: np.ndarray) -> tuple[bool, float]:
         """Passive liveness on a cropped face. Returns (is_live, score)."""

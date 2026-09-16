@@ -27,6 +27,14 @@ export default function KycResultView({
           <span>Liveness passed</span>
           <span>{result.liveness_passed ? "yes" : "no"}</span>
         </li>
+        <li>
+          <span>CNIC-in-hand match score</span>
+          <span>{result.hold_id_match_score.toFixed(3)}</span>
+        </li>
+        <li>
+          <span>CNIC-in-hand match passed</span>
+          <span>{result.hold_id_match_passed ? "yes" : "no"}</span>
+        </li>
         {result.reason && (
           <li>
             <span>Reason</span>

@@ -19,6 +19,7 @@ CREATE TABLE candidates (
     kyc_status          kyc_status NOT NULL DEFAULT 'pending',
     id_document_s3_key  TEXT,           -- encrypted ID scan
     selfie_s3_key       TEXT,           -- encrypted KYC selfie
+    hold_id_s3_key      TEXT,           -- encrypted "hold ID next to face" shot
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );

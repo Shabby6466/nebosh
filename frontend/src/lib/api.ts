@@ -19,6 +19,8 @@ export interface KYCResult {
   match_score: number;
   liveness_score: number;
   liveness_passed: boolean;
+  hold_id_match_score: number;
+  hold_id_match_passed: boolean;
   reason: string | null;
 }
 
@@ -80,10 +82,16 @@ export async function createCandidate(payload: {
   return data;
 }
 
-export async function submitKyc(candidateId: string, idDocument: Blob, selfie: Blob): Promise<KYCResult> {
+export async function submitKyc(
+  candidateId: string,
+  idDocument: Blob,
+  selfie: Blob,
+  holdIdPhoto: Blob,
+): Promise<KYCResult> {
   const form = new FormData();
   form.append("id_document", idDocument, "id_document.jpg");
   form.append("selfie", selfie, "selfie.jpg");
+  form.append("hold_id_photo", holdIdPhoto, "hold_id_photo.jpg");
   const { data } = await api.post<KYCResult>(`/api/v1/kyc/verify`, form, {
     params: { candidate_id: candidateId },
   });

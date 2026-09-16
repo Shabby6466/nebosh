@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60
 
     face_match_threshold: float = 0.38   # cosine similarity, ArcFace embeddings
+    # Lower than face_match_threshold on purpose: this compares a live face against
+    # a small, handheld, glare-prone printed photo on the CNIC (vs. a clean selfie),
+    # which inherently scores lower with ArcFace even for a genuine match.
+    hold_id_match_threshold: float = 0.22
     liveness_threshold: float = 0.5
     person_conf_threshold: float = 0.5
     violation_debounce_frames: int = 2   # consecutive positive frames before flagging
