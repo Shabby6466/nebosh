@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
-import { createSession, endSession, reportSessionEvent, WS_BASE_URL, type FrameEvalResult } from "../lib/api";
+import {
+  createSession,
+  endSession,
+  reportSessionEvent,
+  verifyFaceForSession,
+  WS_BASE_URL,
+  type FrameEvalResult,
+} from "../lib/api";
 import { useCamera } from "../lib/useCamera";
 import { useCandidateSession } from "../lib/candidateStore";
 import Stepper from "../components/Stepper";
@@ -13,6 +20,19 @@ import { axiosMessage } from "./Register";
 
 const CAPTURE_INTERVAL_MS = 2000;
 
+function faceCheckErrorMessage(reason: string | null): string {
+  switch (reason) {
+    case "no_face_detected":
+      return "No face detected — face the camera clearly before starting.";
+    case "face_mismatch":
+      return "Face doesn't match your enrolled identity — make sure it's really you, well lit and facing the camera.";
+    case "liveness_failed":
+      return "Liveness check failed — use a live camera, not a photo or screen.";
+    default:
+      return "Identity check failed — please try again.";
+  }
+}
+
 export default function Session() {
   const { candidateId: paramId } = useParams<{ candidateId: string }>();
   const { candidate } = useCandidateSession();
@@ -21,7 +41,7 @@ export default function Session() {
 
   const [examCode, setExamCode] = useState("NEBOSH-IGC1");
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [status, setStatus] = useState<"idle" | "starting" | "active" | "ended">("idle");
+  const [status, setStatus] = useState<"idle" | "verifying" | "starting" | "active" | "ended">("idle");
   const [error, setError] = useState<string | null>(null);
   const [latest, setLatest] = useState<FrameEvalResult | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
@@ -68,8 +88,29 @@ export default function Session() {
 
   const beginSession = async () => {
     if (!candidateId) return;
-    setStatus("starting");
+    setStatus("verifying");
     setError(null);
+
+    try {
+      const frame = await captureFrame(720, 0.85);
+      if (!frame) {
+        setError("Could not capture a frame from the camera — check your camera and try again.");
+        setStatus("idle");
+        return;
+      }
+      const check = await verifyFaceForSession(candidateId, frame);
+      if (!check.verified) {
+        setError(faceCheckErrorMessage(check.reason));
+        setStatus("idle");
+        return;
+      }
+    } catch (err) {
+      setError(axiosMessage(err));
+      setStatus("idle");
+      return;
+    }
+
+    setStatus("starting");
     try {
       const session = await createSession(candidateId, examCode);
       setSessionId(session.id);
@@ -114,7 +155,8 @@ export default function Session() {
     setStatus("ended");
   };
 
-  const live = status === "starting" || status === "active";
+  const live = status === "verifying" || status === "starting" || status === "active";
+  const inSession = status === "starting" || status === "active";
 
   if (!candidateId) {
     return <Navigate to="/" replace />;
@@ -147,7 +189,7 @@ export default function Session() {
           />
         )}
 
-        {live && (
+        {inSession && (
           <div>
             <MetricsPanel
               sessionId={sessionId}

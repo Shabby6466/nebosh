@@ -20,12 +20,19 @@ export default function MetricsPanel({
       ? "yes"
       : "no";
 
+  const livenessDisplay =
+    latest?.liveness_pass === null || latest?.liveness_pass === undefined
+      ? "—"
+      : latest.liveness_pass
+      ? "yes"
+      : "no";
+
   return (
     <div className="status-panel">
       <ul className="kv">
         <li>
           <span>Session</span>
-          <span>{sessionId}</span>
+          <span title={sessionId ?? undefined}>{sessionId ? sessionId.slice(0, 8) : "—"}</span>
         </li>
         <li>
           <span>Persons detected</span>
@@ -38,6 +45,10 @@ export default function MetricsPanel({
         <li>
           <span>Similarity</span>
           <span>{latest?.face_similarity?.toFixed(3) ?? "—"}</span>
+        </li>
+        <li>
+          <span>Liveness</span>
+          <span>{livenessDisplay}</span>
         </li>
         <li>
           <span>Head yaw</span>

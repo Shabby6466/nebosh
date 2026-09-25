@@ -1,45 +1,34 @@
-"""Generates placeholder ONNX models so the API can boot locally without real
-trained weights. NOT for production or accuracy testing — the liveness model
-always reports "real" and YOLO uses actual pretrained COCO weights (person
-detection is legitimate; only liveness is stubbed since a real anti-spoofing
-model isn't available off-the-shelf without training/licensing a specific one).
+"""Generates local ONNX model files needed to boot the API.
+
+Liveness is a REAL trained model now — minivision-ai's Silent-Face-Anti-Spoofing
+(Apache-2.0), fetched pre-converted to ONNX from a community fork. It's downloaded
+here rather than committed to the repo to keep the checkout small. YOLO uses actual
+pretrained COCO weights, exported locally via ultralytics.
 
 Run once: python scripts/gen_stub_models.py
 """
 import os
-
-import numpy as np
-import onnx
-from onnx import TensorProto, helper
+import urllib.request
 
 os.makedirs("app/ml_models", exist_ok=True)
 
-# --- Stub liveness model: ignores input, always outputs [spoof=0.1, real=0.9] ---
-input_tensor = helper.make_tensor_value_info("input", TensorProto.FLOAT, [1, 3, 80, 80])
-output_tensor = helper.make_tensor_value_info("output", TensorProto.FLOAT, [1, 2])
-
-const_node = helper.make_node(
-    "Constant",
-    inputs=[],
-    outputs=["output"],
-    value=helper.make_tensor(
-        name="const_val",
-        data_type=TensorProto.FLOAT,
-        dims=[1, 2],
-        vals=np.array([[0.1, 0.9]], dtype=np.float32).flatten().tolist(),
-    ),
-)
-
-graph = helper.make_graph([const_node], "stub_liveness", [input_tensor], [output_tensor])
-model = helper.make_model(graph, producer_name="stub-gen")
-model.opset_import[0].version = 13
-model.ir_version = 10  # cap for compatibility with onnxruntime==1.19.2 (max supported IR version 10)
-onnx.checker.check_model(model)
-onnx.save(model, "app/ml_models/minifasnet_liveness.onnx")
-print("Wrote app/ml_models/minifasnet_liveness.onnx (STUB — always passes liveness)")
+# --- Real liveness ensemble: Silent-Face-Anti-Spoofing (MiniFASNetV2 2.7x + MiniFASNetV1SE 4.0x) ---
+_LIVENESS_BASE = "https://raw.githubusercontent.com/QingHeYang/Silent-Face-Anti-Spoofing-onnx/main/onnx"
+_LIVENESS_FILES = {
+    "minifasnet_v2_2.7_80x80.onnx": "2.7_80x80_MiniFASNetV2.onnx",
+    "minifasnet_v1se_4.0_80x80.onnx": "4_0_0_80x80_MiniFASNetV1SE.onnx",
+}
+for local_name, remote_name in _LIVENESS_FILES.items():
+    dest = f"app/ml_models/{local_name}"
+    if os.path.exists(dest):
+        print(f"Skipping {dest} (already present)")
+        continue
+    urllib.request.urlretrieve(f"{_LIVENESS_BASE}/{remote_name}", dest)
+    print(f"Wrote {dest}")
 
 # --- Real YOLOv8n, exported to ONNX (actual pretrained COCO weights) ---
 from ultralytics import YOLO  # noqa: E402
+import onnx  # noqa: E402
 
 yolo = YOLO("yolov8n.pt")  # auto-downloads pretrained weights
 try:

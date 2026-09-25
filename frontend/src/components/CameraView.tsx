@@ -4,7 +4,7 @@ import StatusBadge from "./StatusBadge";
 interface CameraViewProps {
   videoRef: RefObject<HTMLVideoElement | null>;
   showBadge?: boolean;
-  status?: "idle" | "starting" | "active" | "ended";
+  status?: "idle" | "verifying" | "starting" | "active" | "ended";
   violation?: string | null;
   cameraError?: string | null;
 }

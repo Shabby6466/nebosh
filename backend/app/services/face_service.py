@@ -4,6 +4,8 @@ Uses InsightFace (ArcFace, ONNXRuntime backend) for detection + embedding.
 Head-pose (yaw / pitch) is estimated with cv2.solvePnP on the 3D-68-landmark
 output already produced by buffalo_l's 1k3d68 model.  Eye gaze is derived from
 the 2D 106-pt landmarks (also from buffalo_l) — no extra model required.
+Passive liveness uses minivision-ai's Silent-Face-Anti-Spoofing (MiniFASNetV2 +
+MiniFASNetV1SE, ONNX-exported) to catch printed-photo and screen-replay spoofing.
 """
 from __future__ import annotations
 
@@ -44,6 +46,16 @@ class UnexpectedFaceCount(Exception):
         self.count = count
         super().__init__(f"Expected exactly 2 faces (live + ID card), found {count}")
 
+# Passive anti-spoofing ensemble: minivision-ai's Silent-Face-Anti-Spoofing (Apache-2.0),
+# ONNX-exported. Each model looks at a different amount of context around the detected
+# face — a tight 2.7x box and a wider 4.0x box — and their softmax outputs are averaged;
+# this two-scale ensemble is the reference implementation's own accuracy strategy, not an
+# addition of ours. Each model outputs a 3-way softmax over
+# [print_photo_attack, real_face, screen_replay_attack].
+_LIVENESS_MODELS = [
+    ("app/ml_models/minifasnet_v2_2.7_80x80.onnx", 2.7),
+    ("app/ml_models/minifasnet_v1se_4.0_80x80.onnx", 4.0),
+]
 
 class FaceService:
     def __init__(self) -> None:
@@ -51,11 +63,10 @@ class FaceService:
         self._app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
         self._app.prepare(ctx_id=0, det_size=(640, 640))
 
-        # Passive anti-spoofing model (MiniFASNet-style, binary real/spoof classifier).
-        # Path is a local ONNX export — see docs/models.md for training/export notes.
-        self._liveness_session = ort.InferenceSession(
-            "app/ml_models/minifasnet_liveness.onnx", providers=["CPUExecutionProvider"]
-        )
+        self._liveness_sessions = [
+            (ort.InferenceSession(path, providers=["CPUExecutionProvider"]), scale)
+            for path, scale in _LIVENESS_MODELS
+        ]
 
     def get_faces(self, image_bgr: np.ndarray) -> list:
         """Return all detected faces (no count constraint)."""
@@ -237,22 +248,65 @@ class FaceService:
         cutoff = settings.face_match_threshold if threshold is None else threshold
         return score >= cutoff, score
 
-    def check_liveness(self, face_crop_bgr: np.ndarray) -> tuple[bool, float]:
-        """Passive liveness on a cropped face. Returns (is_live, score)."""
-        inp = self._preprocess_liveness(face_crop_bgr)
-        input_name = self._liveness_session.get_inputs()[0].name
-        output = self._liveness_session.run(None, {input_name: inp})[0]
-        # Model outputs [spoof_prob, real_prob] softmax; index 1 = "real"
-        real_score = float(output[0][1])
+    def check_liveness(self, image_bgr: np.ndarray, bbox: np.ndarray) -> tuple[bool, float]:
+        """Passive liveness for the face at `bbox` (an InsightFace face.bbox: [x1,y1,x2,y2])
+        within the *full* frame `image_bgr` — each ensemble model needs to do its own
+        context-expanded crop around the face, so a pre-cropped tight face image won't work
+        here. Returns (is_live, real_score) where real_score is the ensemble-averaged
+        probability of the "real face" class.
+        """
+        probs = np.zeros(3, dtype=np.float64)
+        for session, scale in self._liveness_sessions:
+            crop = self._expand_and_crop(image_bgr, bbox, scale)
+            inp = self._preprocess_liveness(crop)
+            input_name = session.get_inputs()[0].name
+            output = session.run(None, {input_name: inp})[0][0]
+            exp = np.exp(output - np.max(output))
+            probs += exp / exp.sum()
+        probs /= len(self._liveness_sessions)
+
+        # Classes are [print_photo_attack, real_face, screen_replay_attack]
+        real_score = float(probs[1])
         return real_score >= settings.liveness_threshold, real_score
 
     @staticmethod
-    def _preprocess_liveness(face_crop_bgr: np.ndarray) -> np.ndarray:
-        import cv2
+    def _expand_and_crop(image_bgr: np.ndarray, bbox: np.ndarray, scale: float) -> np.ndarray:
+        """Expand a face bbox to a square context crop and resize to 80x80 — replicates
+        Silent-Face-Anti-Spoofing's own box-expansion convention exactly, since the model
+        was trained on crops built this way (not a tight face-only crop)."""
+        src_h, src_w = image_bgr.shape[:2]
+        x1, y1, x2, y2 = (float(v) for v in bbox)
+        box_w, box_h = x2 - x1, y2 - y1
 
-        resized = cv2.resize(face_crop_bgr, (80, 80))
-        normalized = resized.astype(np.float32) / 255.0
-        chw = np.transpose(normalized, (2, 0, 1))
+        scale = min((src_h - 1) / box_h, min((src_w - 1) / box_w, scale))
+        new_w, new_h = box_w * scale, box_h * scale
+        cx, cy = x1 + box_w / 2, y1 + box_h / 2
+
+        lx, ly = cx - new_w / 2, cy - new_h / 2
+        rx, ry = cx + new_w / 2, cy + new_h / 2
+
+        if lx < 0:
+            rx -= lx
+            lx = 0
+        if ly < 0:
+            ry -= ly
+            ly = 0
+        if rx > src_w - 1:
+            lx -= rx - (src_w - 1)
+            rx = src_w - 1
+        if ry > src_h - 1:
+            ly -= ry - (src_h - 1)
+            ry = src_h - 1
+
+        lx, ly, rx, ry = int(lx), int(ly), int(rx), int(ry)
+        crop = image_bgr[max(ly, 0):ry + 1, max(lx, 0):rx + 1]
+        return cv2.resize(crop, (80, 80))
+
+    @staticmethod
+    def _preprocess_liveness(face_crop_bgr: np.ndarray) -> np.ndarray:
+        # Model expects raw [0,255] BGR float32 pixels — NOT normalized to [0,1]. This
+        # matches the reference model's own training/export preprocessing exactly.
+        chw = np.transpose(face_crop_bgr.astype(np.float32), (2, 0, 1))
         return np.expand_dims(chw, axis=0)
 
 

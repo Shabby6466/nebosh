@@ -24,6 +24,15 @@ export interface KYCResult {
   reason: string | null;
 }
 
+export interface FaceCheckResult {
+  verified: boolean;
+  face_match: boolean | null;
+  face_similarity: number | null;
+  liveness_pass: boolean | null;
+  liveness_score: number | null;
+  reason: string | null;
+}
+
 export interface ExamSessionOut {
   id: string;
   candidate_id: string;
@@ -58,6 +67,7 @@ export interface FrameEvalResult {
   face_match: boolean | null;
   face_similarity: number | null;
   liveness_pass: boolean | null;
+  liveness_score: number | null;
   head_yaw: number | null;
   head_pitch: number | null;
   gaze_ratio_x: number | null;
@@ -95,6 +105,13 @@ export async function submitKyc(
   const { data } = await api.post<KYCResult>(`/api/v1/kyc/verify`, form, {
     params: { candidate_id: candidateId },
   });
+  return data;
+}
+
+export async function verifyFaceForSession(candidateId: string, frame: Blob): Promise<FaceCheckResult> {
+  const form = new FormData();
+  form.append("frame", frame, "frame.jpg");
+  const { data } = await api.post<FaceCheckResult>(`/api/v1/candidates/${candidateId}/verify-face`, form);
   return data;
 }
 

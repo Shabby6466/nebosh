@@ -645,6 +645,7 @@ button.active {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   padding: 10px 0;
   border-bottom: 1px solid var(--border-subtle);
   font-size: 13.5px;
@@ -654,11 +655,20 @@ button.active {
 .kv li span:first-child {
   color: var(--muted);
   font-weight: 500;
+  flex-shrink: 0;
 }
 
 .kv li span:last-child {
   font-weight: 600;
   color: var(--text-heading);
+  /* Long unbroken values (a session UUID, in particular) must not force the
+     flex item wider than its container — that pushes the whole row (and the
+     rest of the metrics column) off-screen instead of just this value. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
 }
 
 /* --- Badges (Pill Geometry, No Glowing Shadows) --- */

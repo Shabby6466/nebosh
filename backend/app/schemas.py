@@ -34,6 +34,15 @@ class KYCResult(BaseModel):
     reason: str | None = None
 
 
+class FaceCheckResult(BaseModel):
+    verified: bool
+    face_match: bool | None
+    face_similarity: float | None
+    liveness_pass: bool | None
+    liveness_score: float | None
+    reason: str | None = None
+
+
 class SessionCreate(BaseModel):
     candidate_id: uuid.UUID
     exam_code: str
@@ -66,6 +75,7 @@ class FrameEvalResult(BaseModel):
     face_match: bool | None
     face_similarity: float | None
     liveness_pass: bool | None
+    liveness_score: float | None = None
     head_yaw: float | None = None
     head_pitch: float | None = None
     gaze_ratio_x: float | None = None

@@ -60,9 +60,7 @@ async def verify_kyc(
         raise HTTPException(422, "Multiple faces detected — please submit a photo with only your face visible")
 
     # 2. Liveness check on the selfie only (ID document is a static print/scan by nature)
-    x1, y1, x2, y2 = selfie_face.bbox.astype(int)
-    selfie_crop = selfie_img[max(y1, 0):y2, max(x1, 0):x2]
-    liveness_passed, liveness_score = face_service.check_liveness(selfie_crop)
+    liveness_passed, liveness_score = face_service.check_liveness(selfie_img, selfie_face.bbox)
 
     # 3. 1:1 match between ID photo and live selfie
     match_passed, match_score = face_service.match(id_embedding, selfie_embedding)

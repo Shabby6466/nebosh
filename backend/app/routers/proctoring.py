@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.database import SessionLocal, get_db
 from app.models import ExamSession, FaceEmbedding, SessionFrame, Violation
-from app.schemas import ClientEventCreate, FrameEvalResult
+from app.schemas import ClientEventCreate, FaceCheckResult, FrameEvalResult
 from app.services.face_service import MultipleFacesDetected, NoFaceDetected, face_service
 from app.services.person_detector import person_detector
 from app.services.storage import upload_image
@@ -55,6 +55,7 @@ async def evaluate_frame(
     face_match: bool | None = None
     face_similarity: float | None = None
     liveness_pass: bool | None = None
+    liveness_score: float | None = None
     head_yaw: float | None = None
     head_pitch: float | None = None
     gaze_ratio_x: float | None = None
@@ -85,25 +86,33 @@ async def evaluate_frame(
                 violation_type = "face_mismatch"
                 snapshot_needed = True
             else:
-                # Face confirmed — now check head pose and gaze
-                yaw, pitch, gaze_x, gaze_y = face_service.estimate_pose(face, image_bgr)
-                head_yaw = round(yaw, 1)
-                head_pitch = round(pitch, 1)
-                gaze_ratio_x = round(gaze_x, 3)
-                gaze_ratio_y = round(gaze_y, 3)
+                # Face confirmed as the enrolled candidate — now confirm it's a live
+                # capture, not a printed photo or a phone/screen held up to the camera.
+                liveness_pass, liveness_score = face_service.check_liveness(image_bgr, face.bbox)
 
-                head_turned   = abs(yaw)   > settings.head_yaw_threshold
-                head_down     = pitch      < -settings.head_pitch_down_threshold
-                head_up       = pitch      >  settings.head_pitch_up_threshold
-                gaze_flicked_x = abs(gaze_x - 0.5) > settings.gaze_deviation_threshold
-                
-                # Y gaze neutral is ~0.35 (top eyelid covers iris), not 0.5. 
-                # So we check deviation from 0.35 instead of 0.5.
-                gaze_flicked_y = abs(gaze_y - 0.35) > settings.gaze_deviation_threshold
-
-                if head_turned or head_down or head_up or gaze_flicked_x or gaze_flicked_y:
-                    violation_type = "looking_away"
+                if not liveness_pass:
+                    violation_type = "liveness_failed"
                     snapshot_needed = True
+                else:
+                    # Live and confirmed — now check head pose and gaze
+                    yaw, pitch, gaze_x, gaze_y = face_service.estimate_pose(face, image_bgr)
+                    head_yaw = round(yaw, 1)
+                    head_pitch = round(pitch, 1)
+                    gaze_ratio_x = round(gaze_x, 3)
+                    gaze_ratio_y = round(gaze_y, 3)
+
+                    head_turned   = abs(yaw)   > settings.head_yaw_threshold
+                    head_down     = pitch      < -settings.head_pitch_down_threshold
+                    head_up       = pitch      >  settings.head_pitch_up_threshold
+                    gaze_flicked_x = abs(gaze_x - 0.5) > settings.gaze_deviation_threshold
+
+                    # Y gaze neutral is ~0.35 (top eyelid covers iris), not 0.5.
+                    # So we check deviation from 0.35 instead of 0.5.
+                    gaze_flicked_y = abs(gaze_y - 0.35) > settings.gaze_deviation_threshold
+
+                    if head_turned or head_down or head_up or gaze_flicked_x or gaze_flicked_y:
+                        violation_type = "looking_away"
+                        snapshot_needed = True
 
         except MultipleFacesDetected:
             # InsightFace found more faces than YOLO counted (e.g. a photo/screen in background)
@@ -131,7 +140,11 @@ async def evaluate_frame(
                     session_id=session.id,
                     candidate_id=session.candidate_id,
                     type=violation_type,
-                    confidence=person_conf if violation_type != "face_mismatch" else (1 - (face_similarity or 0)),
+                    confidence=(
+                        (1 - (face_similarity or 0)) if violation_type == "face_mismatch"
+                        else (1 - (liveness_score or 0)) if violation_type == "liveness_failed"
+                        else person_conf
+                    ),
                     snapshot_s3_key=snapshot_key,
                 )
             )
@@ -159,12 +172,64 @@ async def evaluate_frame(
         face_match=face_match,
         face_similarity=face_similarity,
         liveness_pass=liveness_pass,
+        liveness_score=liveness_score,
         head_yaw=head_yaw,
         head_pitch=head_pitch,
         gaze_ratio_x=gaze_ratio_x,
         gaze_ratio_y=gaze_ratio_y,
         violation=violation_type,
         processing_ms=processing_ms,
+    )
+
+
+@router.post("/api/v1/candidates/{candidate_id}/verify-face", response_model=FaceCheckResult)
+async def verify_face(
+    candidate_id: uuid.UUID,
+    frame: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Gate for starting a proctored session: one-shot check that the person in front of
+    the camera right now is both the enrolled candidate and physically present (not a
+    photo/screen). The frontend calls this when "Start proctored session" is clicked, and
+    only proceeds to create the session if `verified` comes back true.
+    """
+    reference_embedding = await _load_reference_embedding(db, candidate_id)
+
+    data = await frame.read()
+    arr = np.frombuffer(data, dtype=np.uint8)
+    image_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if image_bgr is None:
+        raise HTTPException(400, "Could not decode frame")
+
+    try:
+        face = face_service.get_primary_face(image_bgr)
+    except NoFaceDetected:
+        return FaceCheckResult(
+            verified=False,
+            face_match=None,
+            face_similarity=None,
+            liveness_pass=None,
+            liveness_score=None,
+            reason="no_face_detected",
+        )
+
+    emb = face.normed_embedding.astype("float32")
+    face_match, face_similarity = face_service.match(reference_embedding, emb)
+    liveness_pass, liveness_score = face_service.check_liveness(image_bgr, face.bbox)
+
+    reason = None
+    if not face_match:
+        reason = "face_mismatch"
+    elif not liveness_pass:
+        reason = "liveness_failed"
+
+    return FaceCheckResult(
+        verified=face_match and liveness_pass,
+        face_match=face_match,
+        face_similarity=face_similarity,
+        liveness_pass=liveness_pass,
+        liveness_score=liveness_score,
+        reason=reason,
     )
 
 
