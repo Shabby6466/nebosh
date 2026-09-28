@@ -7,9 +7,9 @@ backend/.pytest_cache/
 backend/.mypy_cache/
 backend/.ruff_cache/
 
-# Downloaded/exported ML weights — large binaries, regenerate via scripts/gen_stub_models.py
+# Downloaded/exported ML weights
 backend/yolov8n.pt
-backend/app/ml_models/*.onnx
+backend/yolov8n.onnx.data
 
 # Env files with secrets/credentials
 backend/.env
