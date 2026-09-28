@@ -7,15 +7,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy import func
 
+from app.core.auth import require_admin
 from app.database import get_db
 from app.models import Candidate, ExamSession, Violation
 from app.schemas import CandidateOut, SessionSummaryOut, ViolationOut
 from app.services.storage import signed_url
 
-router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
-
-# NOTE: add auth dependency (JWT + role check) to every route in this router
-# before deploying — omitted here for brevity, see docs/auth.md
+router = APIRouter(
+    prefix="/api/v1/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_admin())],  # any authenticated admin/reviewer/compliance_officer
+)
 
 
 @router.get("/candidates", response_model=list[CandidateOut])

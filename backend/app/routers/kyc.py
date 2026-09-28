@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import require_candidate_scope
 from app.core.config import settings
 from app.database import get_db
 from app.models import Candidate, FaceEmbedding
@@ -36,6 +37,7 @@ async def verify_kyc(
     selfie: UploadFile = File(...),
     hold_id_photo: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    _claims: dict = Depends(require_candidate_scope),
 ):
     candidate = await db.get(Candidate, candidate_id)
     if candidate is None:
@@ -134,7 +136,11 @@ async def verify_kyc(
 
 
 @router.get("/{candidate_id}/status")
-async def kyc_status(candidate_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def kyc_status(
+    candidate_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _claims: dict = Depends(require_candidate_scope),
+):
     candidate = await db.get(Candidate, candidate_id)
     if candidate is None:
         raise HTTPException(404, "Candidate not found")

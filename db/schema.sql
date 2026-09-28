@@ -5,12 +5,27 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "vector";
 
 -- ============================================================
+-- Organizations (API tenants, e.g. Savefast LMS)
+-- ============================================================
+CREATE TABLE organizations (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            TEXT NOT NULL,
+    api_key_hash    TEXT NOT NULL UNIQUE,   -- sha256 of the raw key; raw key is shown once at creation
+    allowed_origin  TEXT,                   -- browser origin allowed via CORS for this tenant
+    webhook_url     TEXT,
+    webhook_secret  TEXT,
+    is_active       BOOLEAN NOT NULL DEFAULT true,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ============================================================
 -- Candidates
 -- ============================================================
 CREATE TYPE kyc_status AS ENUM ('pending', 'verified', 'rejected', 'expired');
 
 CREATE TABLE candidates (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id     UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     full_name           TEXT NOT NULL,
     email               TEXT NOT NULL UNIQUE,
     phone               TEXT,
@@ -26,6 +41,7 @@ CREATE TABLE candidates (
 
 CREATE INDEX idx_candidates_email ON candidates(email);
 CREATE INDEX idx_candidates_kyc_status ON candidates(kyc_status);
+CREATE INDEX idx_candidates_organization ON candidates(organization_id);
 
 -- ============================================================
 -- Face embeddings (versioned — re-KYC creates a new active row)

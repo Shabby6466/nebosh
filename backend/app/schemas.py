@@ -100,3 +100,48 @@ class ViolationOut(BaseModel):
 class ClientEventCreate(BaseModel):
     type: str  # e.g., 'tab_switched', 'window_unfocused'
     confidence: float = 1.0
+
+
+class SessionTokenRequest(BaseModel):
+    candidate_id: uuid.UUID
+    session_id: uuid.UUID | None = None
+    expires_minutes: int | None = None
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+
+
+class AdminLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class OrganizationCreate(BaseModel):
+    name: str
+    allowed_origin: str | None = None
+    webhook_url: str | None = None
+
+
+class OrganizationOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    allowed_origin: str | None
+    webhook_url: str | None
+    is_active: bool
+    created_at: datetime
+    last_active_at: datetime | None
+    candidate_count: int
+    session_count: int
+    violation_count: int
+
+
+class OrganizationCreated(OrganizationOut):
+    api_key: str  # raw key — shown exactly once, here, at creation time
+
+
+class ApiKeyRotated(BaseModel):
+    id: uuid.UUID
+    api_key: str  # raw key — shown exactly once

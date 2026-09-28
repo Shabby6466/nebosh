@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
 
+    # Comma-separated list of origins allowed to call the API from a browser,
+    # e.g. "https://learn.savefast.example.com". Empty = no cross-origin
+    # browser access at all (server-to-server calls are unaffected by CORS).
+    cors_allowed_origins: str = ""
+
     face_match_threshold: float = 0.38   # cosine similarity, ArcFace embeddings
     # Lower than face_match_threshold on purpose: this compares a live face against
     # a small, handheld, glare-prone printed photo on the CNIC (vs. a clean selfie),

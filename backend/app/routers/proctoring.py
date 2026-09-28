@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, WebSock
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import decode_ws_token, require_candidate_scope, require_session_scope
 from app.core.config import settings
 from app.database import SessionLocal, get_db
 from app.models import ExamSession, FaceEmbedding, SessionFrame, Violation
@@ -187,6 +188,7 @@ async def verify_face(
     candidate_id: uuid.UUID,
     frame: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    _claims: dict = Depends(require_candidate_scope),
 ):
     """Gate for starting a proctored session: one-shot check that the person in front of
     the camera right now is both the enrolled candidate and physically present (not a
@@ -238,6 +240,7 @@ async def evaluate_frame_rest(
     session_id: uuid.UUID,
     frame: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    _claims: dict = Depends(require_session_scope),
 ):
     """REST fallback for clients where WebSocket is blocked (restrictive corporate/campus networks)."""
     session = await db.get(ExamSession, session_id)
@@ -260,6 +263,7 @@ async def report_client_event(
     session_id: uuid.UUID,
     event: ClientEventCreate,
     db: AsyncSession = Depends(get_db),
+    _claims: dict = Depends(require_session_scope),
 ):
     """Record client-side events like tab switching or window blur."""
     session = await db.get(ExamSession, session_id)
@@ -279,13 +283,29 @@ async def report_client_event(
     return {"status": "recorded"}
 
 @router.websocket("/ws/v1/sessions/{session_id}")
-async def proctoring_ws(websocket: WebSocket, session_id: uuid.UUID):
+async def proctoring_ws(websocket: WebSocket, session_id: uuid.UUID, token: str):
+    # Browsers can't set custom headers on a WS handshake, so the scoped
+    # session token travels as a query param instead of an Authorization
+    # header. Validate it BEFORE accept() so an unauthorized caller never
+    # gets a live connection.
+    try:
+        claims = decode_ws_token(token)
+    except HTTPException:
+        await websocket.close(code=4401, reason="Invalid or expired token")
+        return
+    if claims.get("sid") and claims["sid"] != str(session_id):
+        await websocket.close(code=4403, reason="Token does not authorize this session")
+        return
+
     await websocket.accept()
 
     async with SessionLocal() as db:
         session = await db.get(ExamSession, session_id)
         if session is None or session.status != "active":
             await websocket.close(code=4404, reason="Active session not found")
+            return
+        if claims["sub"] != str(session.candidate_id):
+            await websocket.close(code=4403, reason="Token does not authorize this candidate")
             return
         try:
             reference_embedding = await _load_reference_embedding(db, session.candidate_id)

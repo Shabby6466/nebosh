@@ -5,20 +5,25 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import require_api_key, require_session_scope, require_session_token
 from app.database import get_db
-from app.models import Candidate, ExamSession
+from app.models import Candidate, ExamSession, Organization
 from app.schemas import CandidateCreate, CandidateOut, SessionCreate, SessionOut
 
 router = APIRouter(prefix="/api/v1", tags=["candidates"])
 
 
 @router.post("/candidates", response_model=CandidateOut, status_code=201)
-async def create_candidate(payload: CandidateCreate, db: AsyncSession = Depends(get_db)):
+async def create_candidate(
+    payload: CandidateCreate,
+    org: Organization = Depends(require_api_key),
+    db: AsyncSession = Depends(get_db),
+):
     existing = await db.execute(select(Candidate).where(Candidate.email == payload.email))
     if existing.scalar_one_or_none():
         raise HTTPException(409, "Candidate with this email already exists")
 
-    candidate = Candidate(**payload.model_dump())
+    candidate = Candidate(organization_id=org.id, **payload.model_dump())
     db.add(candidate)
     await db.commit()
     await db.refresh(candidate)
@@ -26,14 +31,17 @@ async def create_candidate(payload: CandidateCreate, db: AsyncSession = Depends(
 
 
 @router.get("/candidates/lookup", response_model=CandidateOut)
-async def lookup_candidate(email: str = Query(...), db: AsyncSession = Depends(get_db)):
-    """Lets a returning candidate resume their flow without a saved link.
-
-    NOTE: this is an MVP convenience, not an auth mechanism — anyone who knows
-    a candidate's email can pull their KYC status this way. Fine for a local
-    pilot; before a real rollout this should require an OTP/magic-link step.
-    """
-    result = await db.execute(select(Candidate).where(Candidate.email == email))
+async def lookup_candidate(
+    email: str = Query(...),
+    org: Organization = Depends(require_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lets your backend resolve a returning candidate by email. Requires your
+    API key (server-to-server) — never call this from a browser, since it
+    would let anyone who guesses an email pull that candidate's KYC status."""
+    result = await db.execute(
+        select(Candidate).where(Candidate.email == email, Candidate.organization_id == org.id)
+    )
     candidate = result.scalar_one_or_none()
     if candidate is None:
         raise HTTPException(404, "No candidate found with this email")
@@ -41,7 +49,16 @@ async def lookup_candidate(email: str = Query(...), db: AsyncSession = Depends(g
 
 
 @router.post("/sessions", response_model=SessionOut, status_code=201)
-async def create_session(payload: SessionCreate, db: AsyncSession = Depends(get_db)):
+async def create_session(
+    payload: SessionCreate,
+    db: AsyncSession = Depends(get_db),
+    claims: dict = Depends(require_session_token),
+):
+    # candidate_id is in the body, not the path, so check the token's scope
+    # against it explicitly rather than via a path-based dependency.
+    if claims["sub"] != str(payload.candidate_id):
+        raise HTTPException(403, "Token does not authorize this candidate")
+
     candidate = await db.get(Candidate, payload.candidate_id)
     if candidate is None:
         raise HTTPException(404, "Candidate not found")
@@ -56,7 +73,11 @@ async def create_session(payload: SessionCreate, db: AsyncSession = Depends(get_
 
 
 @router.post("/sessions/{session_id}/end", response_model=SessionOut)
-async def end_session(session_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def end_session(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _claims: dict = Depends(require_session_scope),
+):
     session = await db.get(ExamSession, session_id)
     if session is None:
         raise HTTPException(404, "Session not found")

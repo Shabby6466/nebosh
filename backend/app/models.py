@@ -9,10 +9,30 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 
+class Organization(Base):
+    """A tenant integrating with the API (e.g. Savefast LMS). Owns an API key
+    used for server-to-server calls (create candidate, mint session tokens)
+    and, optionally, a webhook endpoint for async result delivery."""
+
+    __tablename__ = "organizations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    api_key_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    allowed_origin: Mapped[str | None] = mapped_column(String)  # for CORS + reference
+    webhook_url: Mapped[str | None] = mapped_column(String)
+    webhook_secret: Mapped[str | None] = mapped_column(String)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    candidates: Mapped[list["Candidate"]] = relationship(back_populates="organization")
+
+
 class Candidate(Base):
     __tablename__ = "candidates"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
     full_name: Mapped[str] = mapped_column(String, nullable=False)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     phone: Mapped[str | None] = mapped_column(String)
@@ -27,6 +47,7 @@ class Candidate(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    organization: Mapped["Organization"] = relationship(back_populates="candidates")
     embeddings: Mapped[list["FaceEmbedding"]] = relationship(back_populates="candidate")
     sessions: Mapped[list["ExamSession"]] = relationship(back_populates="candidate")
 

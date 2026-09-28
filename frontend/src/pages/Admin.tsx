@@ -9,11 +9,15 @@ import {
   type Violation,
 } from "../lib/api";
 import { axiosMessage } from "./Register";
+import AdminLogin from "../components/AdminLogin";
+import VendorsPanel from "../components/VendorsPanel";
+import { clearAdminToken, getAdminToken } from "../lib/adminAuth";
 
 const AUTO_REFRESH_MS = 15000;
 
 export default function Admin() {
-  const [tab, setTab] = useState<"sessions" | "candidates">("sessions");
+  const [authed, setAuthed] = useState(() => Boolean(getAdminToken()));
+  const [tab, setTab] = useState<"sessions" | "candidates" | "vendors">("sessions");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedSession, setSelectedSession] = useState<SessionSummary | null>(null);
@@ -32,17 +36,28 @@ export default function Admin() {
       setSessions(s);
       setLastUpdated(new Date());
     } catch (err) {
-      setError(axiosMessage(err));
+      if (!getAdminToken()) {
+        // interceptor already cleared an expired/invalid token
+        setAuthed(false);
+      } else {
+        setError(axiosMessage(err));
+      }
     } finally {
       if (!opts.silent) setLoading(false);
     }
   };
 
   useEffect(() => {
+    if (!authed) return;
     refresh();
     const id = window.setInterval(() => refresh({ silent: true }), AUTO_REFRESH_MS);
     return () => window.clearInterval(id);
-  }, []);
+  }, [authed]);
+
+  const signOut = () => {
+    clearAdminToken();
+    setAuthed(false);
+  };
 
   const openSession = async (session: SessionSummary) => {
     setSelectedSession(session);
@@ -69,6 +84,10 @@ export default function Admin() {
       (c) => c.full_name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q),
     );
   }, [candidates, query]);
+
+  if (!authed) {
+    return <AdminLogin onLoggedIn={() => setAuthed(true)} />;
+  }
 
   if (selectedSession) {
     return (
@@ -119,7 +138,10 @@ export default function Admin() {
             {lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()} · auto-refreshes every 15s` : "Loading…"}
           </p>
         </div>
-        <button className="link" onClick={() => refresh()} disabled={loading}>{loading ? "Refreshing…" : "Refresh now"}</button>
+        <div className="review-actions">
+          <button className="link" onClick={() => refresh()} disabled={loading}>{loading ? "Refreshing…" : "Refresh now"}</button>
+          <button className="link" onClick={signOut}>Sign out</button>
+        </div>
       </div>
 
       <div className="tabs">
@@ -129,15 +151,22 @@ export default function Admin() {
         <button className={tab === "candidates" ? "active" : ""} onClick={() => setTab("candidates")}>
           Candidates {candidates.length > 0 && <span className="tab-count">{candidates.length}</span>}
         </button>
-        <input
-          className="search"
-          placeholder={tab === "sessions" ? "Search by candidate or exam code…" : "Search by name or email…"}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+        <button className={tab === "vendors" ? "active" : ""} onClick={() => setTab("vendors")}>
+          Vendors
+        </button>
+        {tab !== "vendors" && (
+          <input
+            className="search"
+            placeholder={tab === "sessions" ? "Search by candidate or exam code…" : "Search by name or email…"}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        )}
       </div>
 
       {error && <p className="error">{error}</p>}
+
+      {tab === "vendors" && <VendorsPanel />}
 
       {tab === "sessions" && (
         filteredSessions.length === 0 ? (

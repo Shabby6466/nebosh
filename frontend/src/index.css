@@ -704,6 +704,39 @@ button.active {
   border: 1px solid var(--neutral-border);
 }
 
+/* --- Vendor API key reveal (one-time) --- */
+.key-reveal {
+  background: var(--good-bg);
+  border: 1px solid var(--good-border);
+  border-radius: var(--radius-panel);
+  padding: 16px 20px;
+  margin-bottom: 20px;
+}
+
+.key-reveal p {
+  margin: 0 0 10px;
+  color: var(--text-heading);
+  font-size: 13.5px;
+}
+
+.key-reveal-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.key-reveal-row code {
+  flex: 1;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 8px 12px;
+  font-size: 13px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
 /* --- Live Session Layout --- */
 .session-live {
   display: grid;

@@ -1,9 +1,31 @@
 import axios from "axios";
+import { clearAdminToken, getAdminToken } from "./adminAuth";
 
 export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 export const WS_BASE_URL: string = API_BASE_URL.replace(/^http/, "ws");
 
 export const api = axios.create({ baseURL: API_BASE_URL });
+
+// Admin/vendor-management endpoints require an admin bearer token; attach it
+// automatically so callers don't have to. A 401 back means the token expired
+// or was never set — drop it so the Admin page falls back to the login form.
+api.interceptors.request.use((config) => {
+  if (config.url?.includes("/api/v1/admin/")) {
+    const token = getAdminToken();
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err?.response?.status === 401 && err?.config?.url?.includes("/api/v1/admin/")) {
+      clearAdminToken();
+    }
+    return Promise.reject(err);
+  },
+);
 
 export interface Candidate {
   id: string;
@@ -153,6 +175,65 @@ export async function reviewViolation(
   await api.post(`/api/v1/admin/violations/${violationId}/review`, null, {
     params: { review_status: reviewStatus, notes },
   });
+}
+
+export interface TokenOut {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+}
+
+export async function adminLogin(email: string, password: string): Promise<TokenOut> {
+  const { data } = await api.post<TokenOut>("/api/v1/auth/admin/login", { email, password });
+  return data;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  allowed_origin: string | null;
+  webhook_url: string | null;
+  is_active: boolean;
+  created_at: string;
+  last_active_at: string | null;
+  candidate_count: number;
+  session_count: number;
+  violation_count: number;
+}
+
+export interface OrganizationCreated extends Organization {
+  api_key: string;
+}
+
+export async function listOrganizations(): Promise<Organization[]> {
+  const { data } = await api.get<Organization[]>("/api/v1/admin/organizations");
+  return data;
+}
+
+export async function createOrganization(payload: {
+  name: string;
+  allowed_origin?: string;
+  webhook_url?: string;
+}): Promise<OrganizationCreated> {
+  const { data } = await api.post<OrganizationCreated>("/api/v1/admin/organizations", payload);
+  return data;
+}
+
+export async function revokeOrganization(id: string): Promise<Organization> {
+  const { data } = await api.post<Organization>(`/api/v1/admin/organizations/${id}/revoke`);
+  return data;
+}
+
+export async function reactivateOrganization(id: string): Promise<Organization> {
+  const { data } = await api.post<Organization>(`/api/v1/admin/organizations/${id}/reactivate`);
+  return data;
+}
+
+export async function rotateOrganizationKey(id: string): Promise<{ id: string; api_key: string }> {
+  const { data } = await api.post<{ id: string; api_key: string }>(
+    `/api/v1/admin/organizations/${id}/rotate-key`,
+  );
+  return data;
 }
 
 export async function reportSessionEvent(
