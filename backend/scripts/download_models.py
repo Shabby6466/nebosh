@@ -27,22 +27,23 @@ for local_name, remote_name in _LIVENESS_FILES.items():
     print(f"Wrote {dest}")
 
 # --- Real YOLOv8n, exported to ONNX (actual pretrained COCO weights) ---
-from ultralytics import YOLO  # noqa: E402
-import onnx  # noqa: E402
+dest_yolo = "app/ml_models/yolov8n.onnx"
+if not os.path.exists(dest_yolo):
+    from ultralytics import YOLO  # noqa: E402
+    import onnx  # noqa: E402
 
-yolo = YOLO("yolov8n.pt")  # auto-downloads pretrained weights
-try:
-    yolo.export(format="onnx", imgsz=640)
-except ModuleNotFoundError:
-    # torch>=2.5's default ONNX exporter needs `onnxscript`; if it's not installed,
-    # fall back to the legacy (non-dynamo) exporter which doesn't need it.
-    yolo.export(format="onnx", imgsz=640, dynamo=False)
+    yolo = YOLO("yolov8n.pt")  # auto-downloads pretrained weights
+    exported_file = yolo.export(format="onnx", imgsz=640, opset=12)
 
-# onnx>=1.16's writer defaults to IR version 13, newer than onnxruntime==1.19.2
-# supports (max 10) — cap it so the exported file actually loads.
-yolo_model = onnx.load("yolov8n.onnx")
-yolo_model.ir_version = 10
-onnx.save(yolo_model, "yolov8n.onnx")
+    # Ensure IR version is compatible with ONNXRuntime 1.19
+    yolo_model = onnx.load(exported_file)
+    if yolo_model.ir_version > 10:
+        yolo_model.ir_version = 10
+        onnx.save(yolo_model, dest_yolo)
+    else:
+        if exported_file != dest_yolo:
+            os.replace(exported_file, dest_yolo)
 
-os.rename("yolov8n.onnx", "app/ml_models/yolov8n.onnx")
-print("Wrote app/ml_models/yolov8n.onnx (real pretrained weights)")
+    print("Wrote app/ml_models/yolov8n.onnx (real pretrained weights)")
+else:
+    print("Skipping app/ml_models/yolov8n.onnx (already present)")
