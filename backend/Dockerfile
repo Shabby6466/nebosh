@@ -29,11 +29,14 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r /app/requirements.txt
 
+# Copy backend application code
+COPY . /app
+
+# Generate / download all local ONNX models (MiniFASNet liveness + YOLOv8n)
+RUN python scripts/gen_stub_models.py
+
 # Pre-download InsightFace buffalo_l models during build time so the container boots instantly
 RUN python -c "from insightface.app import FaceAnalysis; app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider']); app.prepare(ctx_id=-1, det_size=(640, 640))"
-
-# Copy backend application code and models
-COPY . /app
 
 # Expose backend API port
 EXPOSE 8000
