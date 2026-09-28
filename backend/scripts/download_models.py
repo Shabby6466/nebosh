@@ -1,11 +1,11 @@
-"""Generates local ONNX model files needed to boot the API.
+"""Downloads and exports the production ONNX model weights needed for the API.
 
-Liveness is a REAL trained model now — minivision-ai's Silent-Face-Anti-Spoofing
-(Apache-2.0), fetched pre-converted to ONNX from a community fork. It's downloaded
-here rather than committed to the repo to keep the checkout small. YOLO uses actual
-pretrained COCO weights, exported locally via ultralytics.
+- MiniFASNet V2 & V1SE: Minivision AI's Silent-Face-Anti-Spoofing (trained passive liveness ensemble)
+- YOLOv8 Nano: Pretrained COCO weights exported to ONNX for person detection
+- InsightFace Buffalo_L: ArcFace 512-dim facial recognition embeddings
 
-Run once: python scripts/gen_stub_models.py
+Usage:
+    python scripts/download_models.py
 """
 import os
 import urllib.request

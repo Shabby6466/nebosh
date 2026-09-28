@@ -32,8 +32,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy backend application code
 COPY . /app
 
-# Generate / download all local ONNX models (MiniFASNet liveness + YOLOv8n)
-RUN python scripts/gen_stub_models.py
+# Download and export production ONNX models (MiniFASNet liveness + YOLOv8n)
+RUN python scripts/download_models.py
 
 # Pre-download InsightFace buffalo_l models during build time so the container boots instantly
 RUN python -c "from insightface.app import FaceAnalysis; app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider']); app.prepare(ctx_id=-1, det_size=(640, 640))"
