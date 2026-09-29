@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     # the whole session — longer sessions should re-mint rather than raise this.
     session_token_max_minutes: int = 240
 
+    # Header carrying the real client IP, set by whatever proxy sits in front:
+    # "x-real-ip" behind nginx, "cf-connecting-ip" behind Cloudflare Tunnel.
+    # Only trusted because the API port isn't reachable except via that proxy.
+    client_ip_header: str = "x-real-ip"
+
     # Swagger UI / ReDoc / openapi.json. Off in production: partners get the
     # exported spec + integration guide instead of a public schema.
     api_docs_enabled: bool = True

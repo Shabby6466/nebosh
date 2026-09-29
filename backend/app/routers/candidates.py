@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import require_api_key, require_session_scope, require_session_token
+from app.core.config import settings
 from app.database import get_db
 from app.models import Candidate, ExamSession, Organization
 from app.schemas import CandidateCreate, CandidateOut, SessionCreate, SessionOut
@@ -61,9 +62,9 @@ async def lookup_candidate(
 
 
 def _client_ip(request: Request) -> str | None:
-    # Nginx sets X-Real-IP; the app port is bound to localhost in production,
-    # so the header can't be supplied by anyone but the proxy.
-    return request.headers.get("x-real-ip") or (request.client.host if request.client else None)
+    # The fronting proxy (nginx or Cloudflare Tunnel, see CLIENT_IP_HEADER) sets
+    # this header; the app port isn't publicly reachable, so clients can't forge it.
+    return request.headers.get(settings.client_ip_header) or (request.client.host if request.client else None)
 
 
 @router.post("/sessions", response_model=SessionOut, status_code=201)
