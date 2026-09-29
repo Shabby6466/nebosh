@@ -89,6 +89,10 @@ async def ready(response: Response):
         *(asyncio.wait_for(c, timeout=3) for c in checks.values()), return_exceptions=True
     )
     status = {name: "ok" if not isinstance(r, BaseException) else "error" for name, r in zip(checks, results)}
+    for name, r in zip(checks, results):
+        if isinstance(r, BaseException):
+            # The response stays terse (it's probe-facing); the cause goes to the logs
+            log.error("readiness check %s failed: %r", name, r)
     healthy = "error" not in status.values()
     if not healthy:
         response.status_code = 503
