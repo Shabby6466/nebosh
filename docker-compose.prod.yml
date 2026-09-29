@@ -59,11 +59,24 @@ services:
     networks:
       - backend-net
 
+  # Admin dashboard (compliance review, vendor API keys/webhooks), served at
+  # admin.proctoring-alt.com via the tunnel: http://nebosh-admin:80
+  admin:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: https://api.proctoring-alt.com
+    container_name: nebosh-admin
+    restart: unless-stopped
+    networks:
+      - backend-net
+
   # Public ingress via Cloudflare Tunnel: an outbound-only connection to
   # Cloudflare, so no inbound ports/firewall forwarding are needed. Hostnames
   # are mapped in the Cloudflare dashboard (Zero Trust > Tunnels):
   #   api.proctoring-alt.com   -> http://nebosh-backend:8000
   #   files.proctoring-alt.com -> http://nebosh-storage:9000
+  #   admin.proctoring-alt.com -> http://nebosh-admin:80
   # Needs TUNNEL_TOKEN in .env.production. Start with:
   #   docker compose -f docker-compose.prod.yml --profile tunnel up -d cloudflared
   cloudflared:

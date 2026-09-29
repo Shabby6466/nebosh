@@ -66,6 +66,15 @@ def test_session_token_not_accepted_on_admin_routes(client, learner):
     assert client.get("/api/v1/admin/candidates", headers=headers).status_code == 403
 
 
+def test_admin_login_throttled_after_failures(client, admin_headers):
+    bad = {"email": "admin@example.com", "password": "wrong"}
+    codes = [client.post("/api/v1/auth/admin/login", json=bad).status_code for _ in range(11)]
+    assert codes[:10] == [401] * 10 and codes[10] == 429
+    # the right password is refused too while locked out
+    good = client.post("/api/v1/auth/admin/login", json={"email": "admin@example.com", "password": "pw"})
+    assert good.status_code == 429
+
+
 def test_api_key_rate_limit(client, make_org, monkeypatch):
     from app.core.config import settings
 

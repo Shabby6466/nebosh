@@ -68,9 +68,11 @@ export interface SessionSummary {
   candidate_id: string;
   candidate_name: string;
   exam_code: string;
+  mode: "exam" | "interview";
   status: string;
   started_at: string;
   ended_at: string | null;
+  trust_score: number | null;
   violation_count: number;
 }
 
@@ -203,6 +205,7 @@ export interface Organization {
 
 export interface OrganizationCreated extends Organization {
   api_key: string;
+  webhook_secret: string; // HMAC key partners use to verify our webhooks — shown once
 }
 
 export async function listOrganizations(): Promise<Organization[]> {
@@ -232,6 +235,21 @@ export async function reactivateOrganization(id: string): Promise<Organization> 
 export async function rotateOrganizationKey(id: string): Promise<{ id: string; api_key: string }> {
   const { data } = await api.post<{ id: string; api_key: string }>(
     `/api/v1/admin/organizations/${id}/rotate-key`,
+  );
+  return data;
+}
+
+export async function updateOrganization(
+  id: string,
+  payload: { allowed_origin?: string | null; webhook_url?: string | null },
+): Promise<Organization> {
+  const { data } = await api.patch<Organization>(`/api/v1/admin/organizations/${id}`, payload);
+  return data;
+}
+
+export async function rotateWebhookSecret(id: string): Promise<{ id: string; webhook_secret: string }> {
+  const { data } = await api.post<{ id: string; webhook_secret: string }>(
+    `/api/v1/admin/organizations/${id}/rotate-webhook-secret`,
   );
   return data;
 }

@@ -84,9 +84,11 @@ class SessionSummaryOut(BaseModel):
     candidate_id: uuid.UUID
     candidate_name: str
     exam_code: str
+    mode: SessionMode
     status: str
     started_at: datetime
     ended_at: datetime | None
+    trust_score: float | None
     violation_count: int
 
 

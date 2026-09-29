@@ -60,9 +60,11 @@ async def list_sessions(
             candidate_id=session.candidate_id,
             candidate_name=candidate_name,
             exam_code=session.exam_code,
+            mode=session.mode,
             status=session.status,
             started_at=session.started_at,
             ended_at=session.ended_at,
+            trust_score=session.trust_score,
             violation_count=violation_count,
         )
         for session, candidate_name, violation_count in result.all()

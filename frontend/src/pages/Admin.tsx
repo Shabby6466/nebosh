@@ -95,7 +95,8 @@ export default function Admin() {
         <button className="link" onClick={() => setSelectedSession(null)}>&larr; Back to sessions</button>
         <h1>{selectedSession.candidate_name}</h1>
         <p className="muted">
-          {selectedSession.exam_code} · {selectedSession.status} · started {new Date(selectedSession.started_at).toLocaleString()}
+          {selectedSession.exam_code} · {selectedSession.mode} · {selectedSession.status} · started {new Date(selectedSession.started_at).toLocaleString()}
+          {selectedSession.trust_score != null && ` · trust score ${selectedSession.trust_score.toFixed(0)}`}
         </p>
 
         {violations.length === 0 ? (
@@ -176,15 +177,17 @@ export default function Admin() {
         ) : (
           <table>
             <thead>
-              <tr><th>Candidate</th><th>Exam</th><th>Status</th><th>Started</th><th>Violations</th></tr>
+              <tr><th>Candidate</th><th>Exam</th><th>Mode</th><th>Status</th><th>Started</th><th>Trust</th><th>Violations</th></tr>
             </thead>
             <tbody>
               {filteredSessions.map((s) => (
                 <tr key={s.id} className="clickable" onClick={() => openSession(s)}>
                   <td>{s.candidate_name}</td>
                   <td>{s.exam_code}</td>
+                  <td>{s.mode}</td>
                   <td><span className={`badge badge-${s.status === "active" ? "good" : "neutral"}`}>{s.status}</span></td>
                   <td>{new Date(s.started_at).toLocaleString()}</td>
+                  <td>{s.trust_score == null ? "—" : s.trust_score.toFixed(0)}</td>
                   <td className={s.violation_count > 0 ? "flag-count" : ""}>{s.violation_count}</td>
                 </tr>
               ))}

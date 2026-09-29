@@ -32,13 +32,13 @@ function CandidateNav() {
   );
 }
 
-export default function Navbar() {
+export default function Navbar({ adminOnly = false }: { adminOnly?: boolean }) {
   return (
     <nav className="nav">
       <Link to="/" className="brand">
-        NEBOSH DEMO AI SYSTEM
+        {adminOnly ? "NEBOSH PROCTORING · ADMIN" : "NEBOSH DEMO AI SYSTEM"}
       </Link>
-      <CandidateNav />
+      {!adminOnly && <CandidateNav />}
     </nav>
   );
 }

@@ -6,6 +6,8 @@ import {
   reactivateOrganization,
   revokeOrganization,
   rotateOrganizationKey,
+  rotateWebhookSecret,
+  updateOrganization,
   type Organization,
 } from "../lib/api";
 import { axiosMessage } from "../pages/Register";
@@ -14,28 +16,49 @@ function formatDate(value: string | null): string {
   return value ? new Date(value).toLocaleString() : "—";
 }
 
-/** Shown exactly once, right after issue/rotation — the raw key is never
- * retrievable again after this closes, only its hash is stored server-side. */
-function NewKeyReveal({ apiKey, onDismiss }: { apiKey: string; onDismiss: () => void }) {
+interface Secret {
+  label: string;
+  value: string;
+}
+
+function SecretRow({ label, value }: Secret) {
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
-    await navigator.clipboard.writeText(apiKey);
+    await navigator.clipboard.writeText(value);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 2000);
   };
 
   return (
-    <div className="key-reveal">
-      <p>
-        <strong>Copy this API key now</strong> — it will not be shown again. Only its hash is stored.
-      </p>
+    <>
+      <p className="muted">{label}</p>
       <div className="key-reveal-row">
-        <code>{apiKey}</code>
+        <code>{value}</code>
         <button type="button" onClick={copy}>
           {copied ? "Copied!" : "Copy"}
         </button>
       </div>
+    </>
+  );
+}
+
+/** Shown exactly once, right after issue/rotation — secrets are never
+ * retrievable again after this closes (API keys are stored only as hashes). */
+function NewSecretsReveal({ orgName, secrets, onDismiss }: {
+  orgName: string;
+  secrets: Secret[];
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="key-reveal">
+      <p>
+        <strong>Copy {secrets.length > 1 ? "these now" : "this now"}</strong> for {orgName} — it will not be
+        shown again. Send it to the vendor over a secure channel.
+      </p>
+      {secrets.map((s) => (
+        <SecretRow key={s.label} {...s} />
+      ))}
       <button type="button" className="link" onClick={onDismiss}>
         I&apos;ve saved it — dismiss
       </button>
@@ -50,7 +73,7 @@ export default function VendorsPanel() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", allowed_origin: "", webhook_url: "" });
   const [submitting, setSubmitting] = useState(false);
-  const [revealedKey, setRevealedKey] = useState<{ orgName: string; apiKey: string } | null>(null);
+  const [revealed, setRevealed] = useState<{ orgName: string; secrets: Secret[] } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const refresh = async () => {
@@ -79,7 +102,13 @@ export default function VendorsPanel() {
         allowed_origin: form.allowed_origin || undefined,
         webhook_url: form.webhook_url || undefined,
       });
-      setRevealedKey({ orgName: created.name, apiKey: created.api_key });
+      setRevealed({
+        orgName: created.name,
+        secrets: [
+          { label: "API key (server-to-server, X-API-Key header)", value: created.api_key },
+          { label: "Webhook signing secret (verifies X-Webhook-Signature)", value: created.webhook_secret },
+        ],
+      });
       setForm({ name: "", allowed_origin: "", webhook_url: "" });
       setShowForm(false);
       await refresh();
@@ -112,7 +141,38 @@ export default function VendorsPanel() {
     setError(null);
     try {
       const { api_key } = await rotateOrganizationKey(org.id);
-      setRevealedKey({ orgName: org.name, apiKey: api_key });
+      setRevealed({ orgName: org.name, secrets: [{ label: "New API key", value: api_key }] });
+    } catch (err) {
+      setError(axiosMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const rotateWebhook = async (org: Organization) => {
+    if (!confirm(`Rotate the webhook signing secret for "${org.name}"? Webhooks are signed with the new secret immediately, so the vendor must switch over at the same time.`)) {
+      return;
+    }
+    setBusyId(org.id);
+    setError(null);
+    try {
+      const { webhook_secret } = await rotateWebhookSecret(org.id);
+      setRevealed({ orgName: org.name, secrets: [{ label: "New webhook signing secret", value: webhook_secret }] });
+    } catch (err) {
+      setError(axiosMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const editWebhook = async (org: Organization) => {
+    const url = prompt(`Webhook URL for "${org.name}" (leave empty to disable webhooks):`, org.webhook_url ?? "");
+    if (url === null) return;
+    setBusyId(org.id);
+    setError(null);
+    try {
+      await updateOrganization(org.id, { webhook_url: url.trim() || null });
+      await refresh();
     } catch (err) {
       setError(axiosMessage(err));
     } finally {
@@ -131,10 +191,11 @@ export default function VendorsPanel() {
         </button>
       </div>
 
-      {revealedKey && (
-        <NewKeyReveal
-          apiKey={revealedKey.apiKey}
-          onDismiss={() => setRevealedKey(null)}
+      {revealed && (
+        <NewSecretsReveal
+          orgName={revealed.orgName}
+          secrets={revealed.secrets}
+          onDismiss={() => setRevealed(null)}
         />
       )}
 
@@ -196,6 +257,7 @@ export default function VendorsPanel() {
                 <td>
                   <div>{org.name}</div>
                   {org.allowed_origin && <div className="muted">{org.allowed_origin}</div>}
+                  <div className="muted">webhook: {org.webhook_url ?? "none"}</div>
                 </td>
                 <td>
                   <span className={`badge badge-${org.is_active ? "good" : "bad"}`}>
@@ -210,6 +272,12 @@ export default function VendorsPanel() {
                   <div className="review-actions">
                     <button type="button" disabled={busyId === org.id} onClick={() => rotate(org)}>
                       Rotate key
+                    </button>
+                    <button type="button" disabled={busyId === org.id} onClick={() => editWebhook(org)}>
+                      Webhook URL
+                    </button>
+                    <button type="button" disabled={busyId === org.id} onClick={() => rotateWebhook(org)}>
+                      Rotate webhook secret
                     </button>
                     <button type="button" disabled={busyId === org.id} onClick={() => toggleActive(org)}>
                       {org.is_active ? "Revoke" : "Reactivate"}

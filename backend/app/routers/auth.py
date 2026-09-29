@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import create_admin_token, create_session_token, require_api_key, verify_password
+from app.core.config import settings
+from app.core.redis import redis_client
 from app.database import get_db
 from app.models import Admin, Candidate, Organization
 from app.schemas import AdminLogin, SessionTokenRequest, TokenOut
@@ -32,12 +34,29 @@ async def issue_session_token(
     return TokenOut(access_token=access_token, expires_in=expires_in)
 
 
+# The admin panel is publicly reachable, so failed logins are throttled both
+# per client IP (one attacker, many accounts) and per email (many IPs, one account).
+_LOGIN_MAX_FAILURES = 10
+_LOGIN_WINDOW_S = 15 * 60
+
+
 @router.post("/admin/login", response_model=TokenOut)
-async def admin_login(payload: AdminLogin, db: AsyncSession = Depends(get_db)):
+async def admin_login(payload: AdminLogin, request: Request, db: AsyncSession = Depends(get_db)):
+    ip = request.headers.get(settings.client_ip_header) or (request.client.host if request.client else "?")
+    keys = [f"admin_login_failed:ip:{ip}", f"admin_login_failed:email:{payload.email.lower()}"]
+    counts = await redis_client.mget(keys)
+    if any(int(c or 0) >= _LOGIN_MAX_FAILURES for c in counts):
+        raise HTTPException(429, "Too many failed sign-in attempts. Try again in 15 minutes.")
+
     result = await db.execute(select(Admin).where(Admin.email == payload.email))
     admin = result.scalar_one_or_none()
     if admin is None or not verify_password(payload.password, admin.password_hash):
+        async with redis_client.pipeline(transaction=True) as pipe:
+            for k in keys:
+                pipe.incr(k).expire(k, _LOGIN_WINDOW_S)
+            await pipe.execute()
         raise HTTPException(401, "Invalid email or password")
 
+    await redis_client.delete(*keys)
     access_token, expires_in = create_admin_token(admin)
     return TokenOut(access_token=access_token, expires_in=expires_in)
