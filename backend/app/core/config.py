@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     # Swagger UI / ReDoc / openapi.json. Off in production: partners get the
     # exported spec + integration guide instead of a public schema.
     api_docs_enabled: bool = True
+    # Shared password (no username) in front of the docs; unset = docs open.
+    api_docs_password: str | None = None
 
     # Per-organization limit on API-key (server-to-server) calls, fixed 1-minute window.
     api_key_rate_limit_per_minute: int = 600

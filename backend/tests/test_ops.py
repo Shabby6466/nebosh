@@ -21,9 +21,55 @@ def test_readiness_reports_failed_dependency(client, monkeypatch):
 
 
 def test_docs_disabled(client):
-    for path in ("/docs", "/redoc", "/openapi.json"):
+    for path in ("/docs", "/redoc", "/openapi.json", "/docs/login"):
         assert client.get(path).status_code == 404
     client.app.openapi()  # spec still generates for export
+
+
+def test_docs_open_without_password(client, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "api_docs_enabled", True)
+    monkeypatch.setattr(settings, "api_docs_password", None)
+    assert "swagger-ui" in client.get("/docs").text
+    assert client.get("/openapi.json").json()["info"]["title"] == "Proctoring API"
+
+
+def test_docs_password_gate(client, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "api_docs_enabled", True)
+    monkeypatch.setattr(settings, "api_docs_password", "s3cret")
+    client.cookies.clear()
+
+    r = client.get("/docs", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/docs/login?next=/docs"
+    assert client.get("/openapi.json").status_code == 401
+    assert 'type="password"' in client.get("/docs/login").text
+
+    bad = client.post("/docs/login", data={"password": "nope", "next": "/redoc"}, follow_redirects=False)
+    assert bad.status_code == 401 and "Wrong password" in bad.text
+
+    ok = client.post("/docs/login", data={"password": "s3cret", "next": "https://evil.test"},
+                     follow_redirects=False)
+    assert ok.status_code == 303 and ok.headers["location"] == "/docs"  # no open redirect
+    assert "swagger-ui" in client.get("/docs").text
+    assert client.get("/openapi.json").status_code == 200
+
+    monkeypatch.setattr(settings, "api_docs_password", "rotated")
+    assert client.get("/openapi.json").status_code == 401  # rotating the password logs everyone out
+    client.cookies.clear()
+
+
+def test_docs_login_rate_limited(client, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "api_docs_enabled", True)
+    monkeypatch.setattr(settings, "api_docs_password", "s3cret")
+    codes = [client.post("/docs/login", data={"password": "x"}).status_code for _ in range(11)]
+    assert codes[:10] == [401] * 10 and codes[10] == 429
+    # even the right password is refused while locked out
+    assert client.post("/docs/login", data={"password": "s3cret"}, follow_redirects=False).status_code == 429
 
 
 def test_metrics_exposed(client, learner):

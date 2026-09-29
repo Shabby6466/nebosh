@@ -12,7 +12,7 @@ from app.core import metrics
 from app.core.config import settings
 from app.core.redis import redis_client
 from app.database import SessionLocal
-from app.routers import admin, auth, candidates, kyc, partner, proctoring, vendors
+from app.routers import admin, auth, candidates, docs, kyc, partner, proctoring, vendors
 from app.services import background
 from app.services.storage import check_bucket
 
@@ -40,13 +40,13 @@ async def lifespan(_app: FastAPI):
     await background.stop(tasks)
 
 
-_docs = settings.api_docs_enabled
 app = FastAPI(
     title="Proctoring API",
     version="1.0.0",
-    docs_url="/docs" if _docs else None,
-    redoc_url="/redoc" if _docs else None,
-    openapi_url="/openapi.json" if _docs else None,
+    # Built-in docs routes off: routers/docs.py serves them (optionally password-gated)
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
     lifespan=lifespan,
 )
 
@@ -67,6 +67,7 @@ app.include_router(kyc.router)
 app.include_router(proctoring.router)
 app.include_router(admin.router)
 app.include_router(vendors.router)
+app.include_router(docs.router)
 
 
 @app.get("/health")
