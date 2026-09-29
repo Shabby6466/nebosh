@@ -14,6 +14,8 @@ import sys
 
 sys.path.insert(0, ".")
 
+import secrets  # noqa: E402
+
 from app.core.auth import generate_api_key, hash_api_key  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.models import Organization  # noqa: E402
@@ -21,12 +23,14 @@ from app.models import Organization  # noqa: E402
 
 async def main(name: str, origin: str | None, webhook_url: str | None):
     raw_key = generate_api_key(name)
+    webhook_secret = f"whsec_{secrets.token_urlsafe(32)}"
     async with SessionLocal() as db:
         org = Organization(
             name=name,
             api_key_hash=hash_api_key(raw_key),
             allowed_origin=origin,
             webhook_url=webhook_url,
+            webhook_secret=webhook_secret,
         )
         db.add(org)
         await db.commit()
@@ -34,6 +38,7 @@ async def main(name: str, origin: str | None, webhook_url: str | None):
 
     print(f"Organization created: {org.id} ({org.name})")
     print(f"API key (shown once, store it securely): {raw_key}")
+    print(f"Webhook signing secret (shown once): {webhook_secret}")
     if origin:
         print(f"Remember to add this origin to CORS_ALLOWED_ORIGINS: {origin}")
 

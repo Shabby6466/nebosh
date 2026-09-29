@@ -106,7 +106,7 @@ export default function Admin() {
           <div className="violation-grid">
             {violations.map((v) => (
               <div key={v.id} className="violation-card">
-                <img src={v.snapshot_url} alt={v.type} />
+                {v.snapshot_url && <img src={v.snapshot_url} alt={v.type} />}
                 <div className="violation-meta">
                   <strong>{v.type.replaceAll("_", " ")}</strong>
                   <span className="muted">{new Date(v.detected_at).toLocaleTimeString()}</span>

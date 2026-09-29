@@ -4,7 +4,9 @@ FROM python:3.11-slim
 # Prevent Python from writing .pyc files and enable unbuffered output for real-time logs
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus \
+    UVICORN_WORKERS=2
 
 WORKDIR /app
 
@@ -42,5 +44,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Start Uvicorn ASGI server
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# Start Uvicorn ASGI server. The metrics dir is wiped first: prometheus_client's
+# multiprocess mode keeps per-worker files there, and stale ones from a previous
+# container run would be summed into the new process's metrics.
+# Size UVICORN_WORKERS (x INFERENCE_THREADS) to the host's cores — see README.
+CMD ["sh", "-c", "rm -rf \"$PROMETHEUS_MULTIPROC_DIR\" && mkdir -p \"$PROMETHEUS_MULTIPROC_DIR\" && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers \"$UVICORN_WORKERS\""]

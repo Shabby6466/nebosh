@@ -147,3 +147,72 @@ uvicorn app.main:app --reload
 ## 8. Data Protection
 
 Government ID images, selfies, and face embeddings are sensitive biometric data. In Pakistan this sits under evolving PECA/data-protection guidance and NEBOSH/IOSH's own data-handling requirements as an accreditation body — before going to production, confirm retention periods and cross-border storage restrictions with legal counsel, encrypt biometric data at rest (KMS-managed keys, not app-level static keys), and restrict embedding-table access to the KYC service role only, not the general app DB user.
+
+## 9. Operations
+
+### Database migrations
+Fresh installs load `db/schema.sql`. Existing databases apply `db/migrations/*.sql`
+in order (each is idempotent — safe to re-run):
+
+```bash
+for f in db/migrations/*.sql; do
+  docker compose -f docker-compose.prod.yml exec -T postgres psql -U postgres -d proctoring < "$f"
+done
+```
+
+### Capacity & sizing
+Proctoring is CPU-bound (YOLO + InsightFace + liveness per frame). Measured on an
+8-core M1 Pro, one worker, synthetic frames:
+
+| INFERENCE_THREADS × ONNX_INTRA_OP_THREADS | Sustained | p95 latency @ 40 learners |
+|---|---|---|
+| 2 × default (all cores, spinning) — old | ~4.2 frames/s | saturated (~10 s) |
+| 2 × 4 | ~5 frames/s | 1.9 s |
+| 4 × 2 | ~6 frames/s | 1.6 s |
+
+Rule of thumb: **~4 concurrent learners per CPU core** at one frame every 7 s
+(conservative; ~5 measured). A 16-core host ≈ 60 learners; 100 learners ≈ 2 such
+hosts behind the load balancer (Redis/Postgres shared). Longer frame intervals
+scale capacity linearly (10 s ≈ 1.4×).
+
+Tuning: keep `UVICORN_WORKERS × INFERENCE_THREADS × ONNX_INTRA_OP_THREADS ≈ cores`.
+More threads than cores makes every frame slower, not faster. Validate on the
+real server before an exam day:
+
+```bash
+python backend/scripts/load_test.py --base-url https://api-staging.example.com --api-key $KEY \
+  --learners 100 --interval 7 --duration 300 \
+  --id-photo id.jpg --selfie selfie.jpg --hold-id-photo hold.jpg --frame frame.jpg
+```
+
+Scale out when `inference_queue_wait_seconds` p95 (see Metrics) rises above ~1 s.
+
+### Background jobs
+Run inside every API worker (`BACKGROUND_JOBS_ENABLED`), safe with many workers/hosts:
+- **Webhook outbox** — `webhook_deliveries` rows are written in the same transaction as
+  the event and delivered with retries (30 s → 6 h backoff, 8 attempts, ~17 h).
+  Failed rows stay in the table with `last_error`.
+- **Idle sessions** — active sessions with no frame/event for
+  `SESSION_IDLE_TIMEOUT_MINUTES` (30) become `abandoned`, are scored, and send `session.ended`.
+- **Retention** — `session_frames` and finished webhook rows older than
+  `SESSION_FRAMES_RETENTION_DAYS` (30) are deleted. Violations, snapshots and session
+  results (incl. `frames_evaluated`, frozen at session end) are kept.
+
+### Health & metrics
+- `GET /health` — liveness (process up); used by the Docker healthcheck.
+- `GET /health/ready` — Postgres, Redis and S3 reachable; 503 otherwise. Internal only (nginx).
+- `GET /metrics` — Prometheus, aggregated across workers. Internal only (nginx). Key series:
+  `inference_queue_wait_seconds` (saturation), `frame_inference_seconds`,
+  `frames_evaluated_total{mode,violation}`, `violations_recorded_total{type}`,
+  `webhook_delivery_attempts_total{outcome}`, `ws_connections`, `http_request_duration_seconds{route}`.
+- Errors go to Sentry when `SENTRY_DSN` is set (no PII sent).
+
+### Tests
+Needs a Postgres server (pgvector optional); the named database is dropped and recreated.
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+docker compose up -d postgres   # dev DB on :5433
+TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/proctoring_test pytest
+```

@@ -18,6 +18,7 @@ password login) for the compliance dashboard endpoints.
 import hashlib
 import re
 import secrets
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -29,6 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.redis import redis_client
 from app.database import get_db
 from app.models import Admin, ExamSession, Organization
 
@@ -74,7 +76,22 @@ async def require_api_key(
     org = result.scalar_one_or_none()
     if org is None:
         raise HTTPException(401, "Invalid or inactive API key")
+    await _enforce_api_key_rate_limit(org.id)
     return org
+
+
+async def _enforce_api_key_rate_limit(organization_id: uuid.UUID) -> None:
+    """Fixed 1-minute window per organization, shared across workers via Redis.
+    Keyed on the org rather than the caller's IP: a partner's backend is one IP
+    making calls for all its learners, which a per-IP limit would throttle."""
+    now = time.time()
+    key = f"ratelimit:apikey:{organization_id}:{int(now // 60)}"
+    async with redis_client.pipeline(transaction=True) as pipe:
+        count, _ = await pipe.incr(key).expire(key, 120).execute()
+    if count > settings.api_key_rate_limit_per_minute:
+        raise HTTPException(
+            429, "API key rate limit exceeded", headers={"Retry-After": str(60 - int(now) % 60)}
+        )
 
 
 # ---------------------------------------------------------------------------

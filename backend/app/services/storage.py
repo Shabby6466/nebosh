@@ -13,13 +13,22 @@ from app.core.config import settings
 
 # Path-style addressing is required for MinIO/local dev (no wildcard DNS for
 # virtual-hosted-style buckets); real AWS S3 works fine with either.
-_s3 = boto3.client(
-    "s3",
-    region_name=settings.s3_region,
-    endpoint_url=settings.s3_endpoint_url or None,
-    aws_access_key_id=settings.aws_access_key_id or None,
-    aws_secret_access_key=settings.aws_secret_access_key or None,
-    config=Config(s3={"addressing_style": "path"}) if settings.s3_endpoint_url else None,
+def _client(endpoint_url: str | None):
+    return boto3.client(
+        "s3",
+        region_name=settings.s3_region,
+        endpoint_url=endpoint_url or None,
+        aws_access_key_id=settings.aws_access_key_id or None,
+        aws_secret_access_key=settings.aws_secret_access_key or None,
+        config=Config(s3={"addressing_style": "path"}) if endpoint_url else None,
+    )
+
+
+_s3 = _client(settings.s3_endpoint_url)
+# Presigned URLs go to partners/reviewers' browsers, so they must be signed
+# against a host those browsers can reach — not the internal Docker hostname.
+_s3_presign = (
+    _client(settings.s3_public_endpoint_url) if settings.s3_public_endpoint_url else _s3
 )
 
 # SSE-KMS requires a KMS-backed store (real AWS S3, or MinIO configured with
@@ -57,8 +66,13 @@ def upload_raw(data: bytes, prefix: str, content_type: str, ext: str) -> str:
 
 
 def signed_url(key: str, expires_in: int = 3600) -> str:
-    return _s3.generate_presigned_url(
+    return _s3_presign.generate_presigned_url(
         "get_object",
         Params={"Bucket": settings.s3_bucket, "Key": key},
         ExpiresIn=expires_in,
     )
+
+
+def check_bucket() -> None:
+    """Raises if the bucket is unreachable or credentials are wrong (readiness probe)."""
+    _s3.head_bucket(Bucket=settings.s3_bucket)

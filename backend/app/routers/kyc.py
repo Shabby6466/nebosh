@@ -1,4 +1,6 @@
+import asyncio
 import uuid
+from datetime import datetime, timezone
 
 import cv2
 import numpy as np
@@ -9,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import require_candidate_scope
 from app.core.config import settings
 from app.database import get_db
-from app.models import Candidate, FaceEmbedding
+from app.models import Candidate, FaceEmbedding, Organization
 from app.schemas import KYCResult
 from app.services.face_service import (
     MultipleFacesDetected,
@@ -17,6 +19,9 @@ from app.services.face_service import (
     UnexpectedFaceCount,
     face_service,
 )
+from app.core.metrics import KYC
+from app.services import webhooks
+from app.services.inference import run_inference
 from app.services.storage import upload_image
 
 router = APIRouter(prefix="/api/v1/kyc", tags=["kyc"])
@@ -30,22 +35,9 @@ def _decode_upload(data: bytes) -> np.ndarray:
     return img
 
 
-@router.post("/verify", response_model=KYCResult)
-async def verify_kyc(
-    candidate_id: uuid.UUID,
-    id_document: UploadFile = File(...),
-    selfie: UploadFile = File(...),
-    hold_id_photo: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-    _claims: dict = Depends(require_candidate_scope),
-):
-    candidate = await db.get(Candidate, candidate_id)
-    if candidate is None:
-        raise HTTPException(404, "Candidate not found")
-
-    id_bytes = await id_document.read()
-    selfie_bytes = await selfie.read()
-    hold_id_bytes = await hold_id_photo.read()
+def _run_kyc_checks(id_bytes: bytes, selfie_bytes: bytes, hold_id_bytes: bytes):
+    """CPU-bound KYC work (decode, detect, embed, liveness, match) — runs in the
+    inference pool, so it must not touch the DB or anything async."""
     id_img = _decode_upload(id_bytes)
     selfie_img = _decode_upload(selfie_bytes)
     hold_id_img = _decode_upload(hold_id_bytes)
@@ -84,17 +76,48 @@ async def verify_kyc(
         hold_live_embedding, hold_card_embedding, threshold=settings.hold_id_match_threshold
     )
 
+    return (
+        id_img, selfie_img, hold_id_img, selfie_embedding,
+        liveness_passed, liveness_score, match_passed, match_score,
+        hold_id_match_passed, hold_id_match_score,
+    )
+
+
+@router.post("/verify", response_model=KYCResult)
+async def verify_kyc(
+    candidate_id: uuid.UUID,
+    id_document: UploadFile = File(...),
+    selfie: UploadFile = File(...),
+    hold_id_photo: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    _claims: dict = Depends(require_candidate_scope),
+):
+    candidate = await db.get(Candidate, candidate_id)
+    if candidate is None:
+        raise HTTPException(404, "Candidate not found")
+
+    id_bytes = await id_document.read()
+    selfie_bytes = await selfie.read()
+    hold_id_bytes = await hold_id_photo.read()
+    (
+        id_img, selfie_img, hold_id_img, selfie_embedding,
+        liveness_passed, liveness_score, match_passed, match_score,
+        hold_id_match_passed, hold_id_match_score,
+    ) = await run_inference(_run_kyc_checks, id_bytes, selfie_bytes, hold_id_bytes)
     verified = liveness_passed and match_passed and hold_id_match_passed
 
     # 5. Persist source images (encrypted at rest via SSE-KMS in storage layer)
-    id_key = upload_image(id_img, prefix=f"kyc/{candidate_id}/id")
-    selfie_key = upload_image(selfie_img, prefix=f"kyc/{candidate_id}/selfie")
-    hold_id_key = upload_image(hold_id_img, prefix=f"kyc/{candidate_id}/hold_id")
+    id_key, selfie_key, hold_id_key = await asyncio.gather(
+        asyncio.to_thread(upload_image, id_img, prefix=f"kyc/{candidate_id}/id"),
+        asyncio.to_thread(upload_image, selfie_img, prefix=f"kyc/{candidate_id}/selfie"),
+        asyncio.to_thread(upload_image, hold_id_img, prefix=f"kyc/{candidate_id}/hold_id"),
+    )
 
     candidate.id_document_s3_key = id_key
     candidate.selfie_s3_key = selfie_key
     candidate.hold_id_s3_key = hold_id_key
     candidate.kyc_status = "verified" if verified else "rejected"
+    candidate.updated_at = datetime.now(timezone.utc)
 
     if verified:
         # Deactivate any prior embedding, store the new one as the active reference
@@ -113,8 +136,6 @@ async def verify_kyc(
             )
         )
 
-    await db.commit()
-
     reason = None
     if not liveness_passed:
         reason = "liveness_check_failed"
@@ -123,7 +144,7 @@ async def verify_kyc(
     elif not hold_id_match_passed:
         reason = "hold_id_mismatch"
 
-    return KYCResult(
+    result = KYCResult(
         candidate_id=candidate_id,
         verified=verified,
         match_score=match_score,
@@ -133,6 +154,12 @@ async def verify_kyc(
         hold_id_match_passed=hold_id_match_passed,
         reason=reason,
     )
+    # The browser gets the result directly; the partner's backend learns of it
+    # here rather than having to trust whatever its own frontend reports.
+    webhooks.enqueue(db, await db.get(Organization, candidate.organization_id), "kyc.completed", result)
+    await db.commit()
+    KYC.labels("verified" if verified else "rejected").inc()
+    return result
 
 
 @router.get("/{candidate_id}/status")

@@ -15,6 +15,7 @@ import onnxruntime as ort
 from insightface.app import FaceAnalysis
 
 from app.core.config import settings
+from app.services import onnx_runtime  # noqa: F401  (sets session defaults before models load)
 
 # 3D reference face model points (generic human face, mm scale).
 # Indices correspond to landmarks produced by InsightFace's 1k3d68 model

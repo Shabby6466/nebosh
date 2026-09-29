@@ -2,8 +2,8 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, SmallInteger, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Index, Integer, SmallInteger, String, Text, func, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -28,13 +28,30 @@ class Organization(Base):
     candidates: Mapped[list["Candidate"]] = relationship(back_populates="organization")
 
 
+VIOLATION_TYPES = (
+    "candidate_missing",
+    "multiple_people",
+    "face_mismatch",
+    "liveness_failed",
+    "looking_away",
+    "connection_lost",
+    "tab_switched",
+    "window_unfocused",
+)
+
+
 class Candidate(Base):
     __tablename__ = "candidates"
+    # Email is unique per organization (two LMS tenants may share a learner),
+    # and compared case-insensitively.
+    __table_args__ = (
+        Index("uq_candidates_org_email", "organization_id", text("lower(email)"), unique=True),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
     full_name: Mapped[str] = mapped_column(String, nullable=False)
-    email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(String, nullable=False)
     phone: Mapped[str | None] = mapped_column(String)
     cnic_or_passport_no: Mapped[str] = mapped_column(String, nullable=False)
     exam_booking_ref: Mapped[str | None] = mapped_column(String)
@@ -73,12 +90,17 @@ class ExamSession(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     candidate_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
     exam_code: Mapped[str] = mapped_column(String, nullable=False)
+    # "interview" (closing viva over video call) skips the looking_away check:
+    # the learner is expected to look at the trainer's video, not straight ahead.
+    mode: Mapped[str] = mapped_column(Enum("exam", "interview", name="session_mode"), default="exam")
     status: Mapped[str] = mapped_column(
         Enum("active", "completed", "terminated", "abandoned", name="session_status"), default="active"
     )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     trust_score: Mapped[float | None] = mapped_column(Float)
+    # Frozen at session end so reports survive session_frames retention.
+    frames_evaluated: Mapped[int | None] = mapped_column(Integer)
     client_ip: Mapped[str | None] = mapped_column(String)
     user_agent: Mapped[str | None] = mapped_column(Text)
 
@@ -100,6 +122,8 @@ class SessionFrame(Base):
     head_pitch: Mapped[float | None] = mapped_column(Float)
     gaze_ratio_x: Mapped[float | None] = mapped_column(Float)
     gaze_ratio_y: Mapped[float | None] = mapped_column(Float)
+    # What this single frame showed (before debouncing) — drives trust_score.
+    violation: Mapped[str | None] = mapped_column(Enum(*VIOLATION_TYPES, name="violation_type"))
     processing_ms: Mapped[int | None] = mapped_column(Integer)
 
 
@@ -109,19 +133,7 @@ class Violation(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("exam_sessions.id", ondelete="CASCADE"))
     candidate_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
-    type: Mapped[str] = mapped_column(
-        Enum(
-            "candidate_missing",
-            "multiple_people",
-            "face_mismatch",
-            "liveness_failed",
-            "looking_away",
-            "connection_lost",
-            "tab_switched",
-            "window_unfocused",
-            name="violation_type",
-        )
-    )
+    type: Mapped[str] = mapped_column(Enum(*VIOLATION_TYPES, name="violation_type"))
     confidence: Mapped[float | None] = mapped_column(Float)
     snapshot_s3_key: Mapped[str] = mapped_column(String, nullable=False)
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -139,10 +151,30 @@ class Admin(Base):
     __tablename__ = "admins"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(String, nullable=False)
     password_hash: Mapped[str] = mapped_column(String, nullable=False)
     full_name: Mapped[str] = mapped_column(String, nullable=False)
     role: Mapped[str] = mapped_column(
         Enum("reviewer", "compliance_officer", "admin", name="admin_role"), default="reviewer"
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WebhookDelivery(Base):
+    """Outbox row: written in the same transaction as the event it reports,
+    delivered later by services.background (so a crash/restart can't lose it)."""
+
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    event: Mapped[str] = mapped_column(String, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Enum("pending", "delivered", "failed", name="webhook_status"), default="pending"
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

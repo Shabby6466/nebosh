@@ -11,29 +11,35 @@ from app.core.auth import require_admin
 from app.database import get_db
 from app.models import Candidate, ExamSession, Violation
 from app.schemas import CandidateOut, SessionSummaryOut, ViolationOut
-from app.services.storage import signed_url
+from app.services.session_report import violation_out
 
 router = APIRouter(
     prefix="/api/v1/admin",
     tags=["admin"],
-    dependencies=[Depends(require_admin())],  # any authenticated admin/reviewer/compliance_officer
+    dependencies=[Depends(require_admin())],
 )
 
 
 @router.get("/candidates", response_model=list[CandidateOut])
 async def list_candidates(
     kyc_status: str | None = Query(default=None),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Candidate)
     if kyc_status:
         stmt = stmt.where(Candidate.kyc_status == kyc_status)
-    result = await db.execute(stmt.order_by(Candidate.created_at.desc()))
+    result = await db.execute(stmt.order_by(Candidate.created_at.desc()).limit(limit).offset(offset))
     return result.scalars().all()
 
 
 @router.get("/sessions", response_model=list[SessionSummaryOut])
-async def list_sessions(db: AsyncSession = Depends(get_db)):
+async def list_sessions(
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
     violation_counts = (
         select(Violation.session_id, func.count(Violation.id).label("count"))
         .group_by(Violation.session_id)
@@ -44,7 +50,8 @@ async def list_sessions(db: AsyncSession = Depends(get_db)):
         .join(Candidate, Candidate.id == ExamSession.candidate_id)
         .outerjoin(violation_counts, violation_counts.c.session_id == ExamSession.id)
         .order_by(ExamSession.started_at.desc())
-        .limit(100)
+        .limit(limit)
+        .offset(offset)
     )
     result = await db.execute(stmt)
     return [
@@ -67,19 +74,7 @@ async def session_violations(session_id: uuid.UUID, db: AsyncSession = Depends(g
     result = await db.execute(
         select(Violation).where(Violation.session_id == session_id).order_by(Violation.detected_at)
     )
-    violations = result.scalars().all()
-    return [
-        ViolationOut(
-            id=v.id,
-            session_id=v.session_id,
-            type=v.type,
-            confidence=v.confidence,
-            detected_at=v.detected_at,
-            review_status=v.review_status,
-            snapshot_url=signed_url(v.snapshot_s3_key),
-        )
-        for v in violations
-    ]
+    return [violation_out(v) for v in result.scalars().all()]
 
 
 @router.post("/violations/{violation_id}/review")

@@ -1,6 +1,6 @@
+import asyncio
 import time
 import uuid
-from collections import defaultdict
 
 import cv2
 import numpy as np
@@ -10,18 +10,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import decode_ws_token, require_candidate_scope, require_session_scope
 from app.core.config import settings
+from app.core.metrics import FRAME_INFERENCE, FRAMES, VIOLATIONS, WS_CONNECTIONS
 from app.database import SessionLocal, get_db
 from app.models import ExamSession, FaceEmbedding, SessionFrame, Violation
 from app.schemas import ClientEventCreate, FaceCheckResult, FrameEvalResult
+from app.services import violation_streaks
 from app.services.face_service import MultipleFacesDetected, NoFaceDetected, face_service
+from app.services.inference import run_inference
 from app.services.person_detector import person_detector
 from app.services.storage import upload_image
 
 router = APIRouter(tags=["proctoring"])
-
-# In-memory debounce counters: {session_id: {violation_type: consecutive_count}}
-# For multi-instance deployments, back this with Redis instead.
-_violation_streaks: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
 
 async def _load_reference_embedding(db: AsyncSession, candidate_id: uuid.UUID) -> np.ndarray:
@@ -45,9 +44,15 @@ def _resize_cap(image_bgr: np.ndarray, max_dim: int) -> np.ndarray:
     return cv2.resize(image_bgr, (int(w * scale), int(h * scale)))
 
 
-async def evaluate_frame(
-    db: AsyncSession, session: ExamSession, image_bgr: np.ndarray, reference_embedding: np.ndarray
-) -> FrameEvalResult:
+def _analyze_frame(
+    image_bgr: np.ndarray, reference_embedding: np.ndarray, flag_looking_away: bool
+) -> tuple[np.ndarray, FrameEvalResult, float]:
+    """CPU-bound part of frame evaluation — runs in the inference pool, so it
+    must not touch the DB or anything async. Returns the (resized) image the
+    checks ran on, the result, and the person-detector confidence.
+
+    With `flag_looking_away` off (interview mode) pose/gaze are still measured
+    and logged, just never raised as a violation."""
     t0 = time.monotonic()
     image_bgr = _resize_cap(image_bgr, settings.max_frame_dim_px)
 
@@ -62,14 +67,11 @@ async def evaluate_frame(
     gaze_ratio_x: float | None = None
     gaze_ratio_y: float | None = None
     violation_type: str | None = None
-    snapshot_needed = False
 
     if person_count == 0:
         violation_type = "candidate_missing"
-        snapshot_needed = True
     elif person_count > 1:
         violation_type = "multiple_people"
-        snapshot_needed = True
     else:
         # Exactly one person — run face match against the enrolled reference
         try:
@@ -85,7 +87,6 @@ async def evaluate_frame(
 
             if not face_match:
                 violation_type = "face_mismatch"
-                snapshot_needed = True
             else:
                 # Face confirmed as the enrolled candidate — now confirm it's a live
                 # capture, not a printed photo or a phone/screen held up to the camera.
@@ -93,7 +94,6 @@ async def evaluate_frame(
 
                 if not liveness_pass:
                     violation_type = "liveness_failed"
-                    snapshot_needed = True
                 else:
                     # Live and confirmed — now check head pose and gaze
                     yaw, pitch, gaze_x, gaze_y = face_service.estimate_pose(face, image_bgr)
@@ -111,64 +111,18 @@ async def evaluate_frame(
                     # So we check deviation from 0.35 instead of 0.5.
                     gaze_flicked_y = abs(gaze_y - 0.35) > settings.gaze_deviation_threshold
 
-                    if head_turned or head_down or head_up or gaze_flicked_x or gaze_flicked_y:
+                    looking_away = head_turned or head_down or head_up or gaze_flicked_x or gaze_flicked_y
+                    if flag_looking_away and looking_away:
                         violation_type = "looking_away"
-                        snapshot_needed = True
 
         except MultipleFacesDetected:
             # InsightFace found more faces than YOLO counted (e.g. a photo/screen in background)
             violation_type = "multiple_people"
-            snapshot_needed = True
         except NoFaceDetected:
             # Person detected by YOLO but no clear face (e.g. facing away) — treat as missing
             violation_type = "candidate_missing"
-            snapshot_needed = True
 
-    processing_ms = int((time.monotonic() - t0) * 1000)
-
-    if violation_type:
-        streaks = _violation_streaks[str(session.id)]
-        streaks[violation_type] += 1
-        # reset other streak counters on a differing observation
-        for k in list(streaks.keys()):
-            if k != violation_type:
-                streaks[k] = 0
-
-        if streaks[violation_type] >= settings.violation_debounce_frames and snapshot_needed:
-            snapshot_key = upload_image(image_bgr, prefix=f"violations/{session.id}")
-            db.add(
-                Violation(
-                    session_id=session.id,
-                    candidate_id=session.candidate_id,
-                    type=violation_type,
-                    confidence=(
-                        (1 - (face_similarity or 0)) if violation_type == "face_mismatch"
-                        else (1 - (liveness_score or 0)) if violation_type == "liveness_failed"
-                        else person_conf
-                    ),
-                    snapshot_s3_key=snapshot_key,
-                )
-            )
-    else:
-        _violation_streaks[str(session.id)] = defaultdict(int)
-
-    db.add(
-        SessionFrame(
-            session_id=session.id,
-            person_count=person_count,
-            face_match=face_match,
-            face_similarity=face_similarity,
-            liveness_pass=liveness_pass,
-            head_yaw=head_yaw,
-            head_pitch=head_pitch,
-            gaze_ratio_x=gaze_ratio_x,
-            gaze_ratio_y=gaze_ratio_y,
-            processing_ms=processing_ms,
-        )
-    )
-    await db.commit()
-
-    return FrameEvalResult(
+    result = FrameEvalResult(
         person_count=person_count,
         face_match=face_match,
         face_similarity=face_similarity,
@@ -179,30 +133,64 @@ async def evaluate_frame(
         gaze_ratio_x=gaze_ratio_x,
         gaze_ratio_y=gaze_ratio_y,
         violation=violation_type,
-        processing_ms=processing_ms,
+        processing_ms=int((time.monotonic() - t0) * 1000),
     )
+    return image_bgr, result, person_conf
 
 
-@router.post("/api/v1/candidates/{candidate_id}/verify-face", response_model=FaceCheckResult)
-async def verify_face(
-    candidate_id: uuid.UUID,
-    frame: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-    _claims: dict = Depends(require_candidate_scope),
-):
-    """Gate for starting a proctored session: one-shot check that the person in front of
-    the camera right now is both the enrolled candidate and physically present (not a
-    photo/screen). The frontend calls this when "Start proctored session" is clicked, and
-    only proceeds to create the session if `verified` comes back true.
-    """
-    reference_embedding = await _load_reference_embedding(db, candidate_id)
+async def evaluate_frame(
+    db: AsyncSession, session: ExamSession, image_bgr: np.ndarray, reference_embedding: np.ndarray
+) -> FrameEvalResult:
+    image_bgr, result, person_conf = await run_inference(
+        _analyze_frame, image_bgr, reference_embedding, session.mode != "interview"
+    )
+    violation_type = result.violation
+    FRAME_INFERENCE.observe(result.processing_ms / 1000)
+    FRAMES.labels(session.mode, violation_type or "none").inc()
 
-    data = await frame.read()
-    arr = np.frombuffer(data, dtype=np.uint8)
-    image_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if image_bgr is None:
-        raise HTTPException(400, "Could not decode frame")
+    if violation_type:
+        streak = await violation_streaks.bump(session.id, violation_type)
+        if streak >= settings.violation_debounce_frames:
+            snapshot_key = await asyncio.to_thread(
+                upload_image, image_bgr, prefix=f"violations/{session.id}"
+            )
+            db.add(
+                Violation(
+                    session_id=session.id,
+                    candidate_id=session.candidate_id,
+                    type=violation_type,
+                    confidence=(
+                        (1 - (result.face_similarity or 0)) if violation_type == "face_mismatch"
+                        else (1 - (result.liveness_score or 0)) if violation_type == "liveness_failed"
+                        else person_conf
+                    ),
+                    snapshot_s3_key=snapshot_key,
+                )
+            )
+            VIOLATIONS.labels(violation_type).inc()
+    else:
+        await violation_streaks.reset(session.id)
 
+    db.add(
+        SessionFrame(
+            session_id=session.id,
+            person_count=result.person_count,
+            face_match=result.face_match,
+            face_similarity=result.face_similarity,
+            liveness_pass=result.liveness_pass,
+            head_yaw=result.head_yaw,
+            head_pitch=result.head_pitch,
+            gaze_ratio_x=result.gaze_ratio_x,
+            gaze_ratio_y=result.gaze_ratio_y,
+            violation=violation_type,
+            processing_ms=result.processing_ms,
+        )
+    )
+    await db.commit()
+    return result
+
+
+def _check_face(image_bgr: np.ndarray, reference_embedding: np.ndarray) -> FaceCheckResult:
     try:
         face = face_service.get_primary_face(image_bgr)
     except NoFaceDetected:
@@ -233,6 +221,29 @@ async def verify_face(
         liveness_score=liveness_score,
         reason=reason,
     )
+
+
+@router.post("/api/v1/candidates/{candidate_id}/verify-face", response_model=FaceCheckResult)
+async def verify_face(
+    candidate_id: uuid.UUID,
+    frame: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    _claims: dict = Depends(require_candidate_scope),
+):
+    """Gate for starting a proctored session: one-shot check that the person in front of
+    the camera right now is both the enrolled candidate and physically present (not a
+    photo/screen). The frontend calls this when "Start proctored session" is clicked, and
+    only proceeds to create the session if `verified` comes back true.
+    """
+    reference_embedding = await _load_reference_embedding(db, candidate_id)
+
+    data = await frame.read()
+    arr = np.frombuffer(data, dtype=np.uint8)
+    image_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if image_bgr is None:
+        raise HTTPException(400, "Could not decode frame")
+
+    return await run_inference(_check_face, image_bgr, reference_embedding)
 
 
 @router.post("/api/v1/sessions/{session_id}/frame", response_model=FrameEvalResult)
@@ -280,6 +291,7 @@ async def report_client_event(
         )
     )
     await db.commit()
+    VIOLATIONS.labels(event.type).inc()
     return {"status": "recorded"}
 
 @router.websocket("/ws/v1/sessions/{session_id}")
@@ -298,7 +310,11 @@ async def proctoring_ws(websocket: WebSocket, session_id: uuid.UUID, token: str)
         return
 
     await websocket.accept()
+    with WS_CONNECTIONS.track_inprogress():
+        await _serve_ws(websocket, session_id, claims)
 
+
+async def _serve_ws(websocket: WebSocket, session_id: uuid.UUID, claims: dict) -> None:
     async with SessionLocal() as db:
         session = await db.get(ExamSession, session_id)
         if session is None or session.status != "active":
@@ -317,6 +333,13 @@ async def proctoring_ws(websocket: WebSocket, session_id: uuid.UUID, token: str)
             while True:
                 # Client sends raw JPEG bytes for each captured frame (binary WS message)
                 data = await websocket.receive_bytes()
+
+                # The session may have been ended (via REST) while this socket stayed open
+                await db.refresh(session, attribute_names=["status"])
+                if session.status != "active":
+                    await websocket.close(code=4410, reason="Session has ended")
+                    return
+
                 arr = np.frombuffer(data, dtype=np.uint8)
                 image_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                 if image_bgr is None:

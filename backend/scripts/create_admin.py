@@ -11,9 +11,9 @@ import sys
 
 sys.path.insert(0, ".")
 
-from app.core.auth import hash_password  # noqa: E402
-from app.database import SessionLocal  # noqa: E402
-from app.models import Admin  # noqa: E402
+from app.core.auth import hash_password
+from app.database import SessionLocal
+from app.models import Admin
 
 
 async def main(email: str, full_name: str, role: str, password: str):

@@ -81,7 +81,7 @@ export interface Violation {
   confidence: number | null;
   detected_at: string;
   review_status: "unreviewed" | "confirmed" | "false_positive";
-  snapshot_url: string;
+  snapshot_url: string | null; // null for browser events (no snapshot)
 }
 
 export interface FrameEvalResult {

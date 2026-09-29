@@ -27,7 +27,7 @@ CREATE TABLE candidates (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id     UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     full_name           TEXT NOT NULL,
-    email               TEXT NOT NULL UNIQUE,
+    email               TEXT NOT NULL,
     phone               TEXT,
     cnic_or_passport_no TEXT NOT NULL,
     exam_booking_ref    TEXT,
@@ -39,7 +39,8 @@ CREATE TABLE candidates (
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_candidates_email ON candidates(email);
+-- Unique per tenant, case-insensitive (two LMS tenants may share a learner)
+CREATE UNIQUE INDEX uq_candidates_org_email ON candidates(organization_id, lower(email));
 CREATE INDEX idx_candidates_kyc_status ON candidates(kyc_status);
 CREATE INDEX idx_candidates_organization ON candidates(organization_id);
 
@@ -67,15 +68,29 @@ CREATE INDEX idx_face_embeddings_vector ON face_embeddings
 -- Exam sessions
 -- ============================================================
 CREATE TYPE session_status AS ENUM ('active', 'completed', 'terminated', 'abandoned');
+CREATE TYPE session_mode AS ENUM ('exam', 'interview');
+
+CREATE TYPE violation_type AS ENUM (
+    'candidate_missing',
+    'multiple_people',
+    'face_mismatch',
+    'liveness_failed',
+    'looking_away',
+    'connection_lost',
+    'tab_switched',
+    'window_unfocused'
+);
 
 CREATE TABLE exam_sessions (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     candidate_id    UUID NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
     exam_code       TEXT NOT NULL,       -- e.g. NEBOSH-IGC1
+    mode            session_mode NOT NULL DEFAULT 'exam',  -- 'interview' = closing viva, no looking_away
     status          session_status NOT NULL DEFAULT 'active',
     started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     ended_at        TIMESTAMPTZ,
     trust_score     REAL,                -- 0-100, computed at session end
+    frames_evaluated INTEGER,            -- frozen at session end (survives session_frames retention)
     client_ip       TEXT,
     user_agent      TEXT
 );
@@ -95,6 +110,11 @@ CREATE TABLE session_frames (
     face_match      BOOLEAN,
     face_similarity REAL,
     liveness_pass   BOOLEAN,
+    head_yaw        REAL,               -- degrees, + = turned right
+    head_pitch      REAL,               -- degrees, + = tilted up
+    gaze_ratio_x    REAL,               -- 0.5 = centred
+    gaze_ratio_y    REAL,
+    violation       violation_type,     -- what this frame showed, pre-debounce (drives trust_score)
     processing_ms   INTEGER
 );
 
@@ -104,13 +124,6 @@ CREATE INDEX idx_session_frames_session_time ON session_frames(session_id, captu
 -- ============================================================
 -- Violations
 -- ============================================================
-CREATE TYPE violation_type AS ENUM (
-    'candidate_missing',
-    'multiple_people',
-    'face_mismatch',
-    'liveness_failed',
-    'connection_lost'
-);
 
 CREATE TYPE review_status AS ENUM ('unreviewed', 'confirmed', 'false_positive');
 
@@ -131,6 +144,28 @@ CREATE TABLE violations (
 CREATE INDEX idx_violations_session ON violations(session_id);
 CREATE INDEX idx_violations_candidate ON violations(candidate_id);
 CREATE INDEX idx_violations_review_status ON violations(review_status);
+
+-- ============================================================
+-- Webhook outbox — rows are written in the same transaction as the event,
+-- then delivered (with retries) by a background loop in the API workers
+-- ============================================================
+CREATE TYPE webhook_status AS ENUM ('pending', 'delivered', 'failed');
+
+CREATE TABLE webhook_deliveries (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    event           TEXT NOT NULL,
+    payload         JSONB NOT NULL,          -- exact body sent (id, event, created_at, data)
+    status          webhook_status NOT NULL DEFAULT 'pending',
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_error      TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    delivered_at    TIMESTAMPTZ
+);
+
+CREATE INDEX idx_webhook_deliveries_due ON webhook_deliveries(next_attempt_at) WHERE status = 'pending';
+CREATE INDEX idx_webhook_deliveries_org ON webhook_deliveries(organization_id, created_at);
 
 -- ============================================================
 -- Admin / compliance users

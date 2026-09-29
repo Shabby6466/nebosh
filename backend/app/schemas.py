@@ -1,7 +1,12 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+from app.core.config import settings
+
+SessionMode = Literal["exam", "interview"]
 
 
 class CandidateCreate(BaseModel):
@@ -10,6 +15,11 @@ class CandidateCreate(BaseModel):
     phone: str | None = None
     cnic_or_passport_no: str
     exam_booking_ref: str | None = None
+
+    @field_validator("email")
+    @classmethod
+    def _lowercase_email(cls, v: str) -> str:
+        return v.lower()
 
 
 class CandidateOut(BaseModel):
@@ -21,6 +31,12 @@ class CandidateOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class CandidateDetailOut(CandidateOut):
+    cnic_or_passport_no: str
+    exam_booking_ref: str | None
+    updated_at: datetime
 
 
 class KYCResult(BaseModel):
@@ -46,14 +62,18 @@ class FaceCheckResult(BaseModel):
 class SessionCreate(BaseModel):
     candidate_id: uuid.UUID
     exam_code: str
+    mode: SessionMode = "exam"
 
 
 class SessionOut(BaseModel):
     id: uuid.UUID
     candidate_id: uuid.UUID
     exam_code: str
+    mode: SessionMode
     status: str
     started_at: datetime
+    ended_at: datetime | None = None
+    trust_score: float | None = None
 
     class Config:
         from_attributes = True
@@ -91,21 +111,36 @@ class ViolationOut(BaseModel):
     confidence: float | None
     detected_at: datetime
     review_status: str
-    snapshot_url: str  # signed URL, populated at serialization time
+    snapshot_url: str | None  # signed URL; None for client events (no snapshot)
 
     class Config:
         from_attributes = True
 
 
+class SessionReportOut(BaseModel):
+    """Partner-facing outcome of one session (API key, own organization only)."""
+    id: uuid.UUID
+    candidate_id: uuid.UUID
+    exam_code: str
+    mode: SessionMode
+    status: str
+    started_at: datetime
+    ended_at: datetime | None
+    trust_score: float | None
+    frames_evaluated: int
+    violation_counts: dict[str, int]
+    violations: list[ViolationOut]
+
+
 class ClientEventCreate(BaseModel):
-    type: str  # e.g., 'tab_switched', 'window_unfocused'
-    confidence: float = 1.0
+    type: Literal["tab_switched", "window_unfocused", "connection_lost"]
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
 class SessionTokenRequest(BaseModel):
     candidate_id: uuid.UUID
     session_id: uuid.UUID | None = None
-    expires_minutes: int | None = None
+    expires_minutes: int | None = Field(default=None, ge=1, le=settings.session_token_max_minutes)
 
 
 class TokenOut(BaseModel):
@@ -138,8 +173,19 @@ class OrganizationOut(BaseModel):
     violation_count: int
 
 
+class OrganizationUpdate(BaseModel):
+    allowed_origin: str | None = None
+    webhook_url: str | None = None
+
+
 class OrganizationCreated(OrganizationOut):
     api_key: str  # raw key — shown exactly once, here, at creation time
+    webhook_secret: str  # HMAC key for verifying our webhook signatures — shown once
+
+
+class WebhookSecretRotated(BaseModel):
+    id: uuid.UUID
+    webhook_secret: str  # shown exactly once
 
 
 class ApiKeyRotated(BaseModel):
