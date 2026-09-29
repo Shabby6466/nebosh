@@ -1,7 +1,9 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 import sentry_sdk
+from sentry_sdk.utils import BadDsn
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -14,14 +16,21 @@ from app.routers import admin, auth, candidates, kyc, partner, proctoring, vendo
 from app.services import background
 from app.services.storage import check_bucket
 
-if settings.sentry_dsn:
+log = logging.getLogger(__name__)
+
+if settings.sentry_dsn and settings.sentry_dsn.strip():
     # FastAPI/Starlette integrations are enabled automatically. PII (IPs,
     # headers, bodies) is not sent: send_default_pii stays off.
-    sentry_sdk.init(
-        dsn=settings.sentry_dsn,
-        environment=settings.sentry_environment,
-        traces_sample_rate=settings.sentry_traces_sample_rate,
-    )
+    try:
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn.strip(),
+            environment=settings.sentry_environment,
+            traces_sample_rate=settings.sentry_traces_sample_rate,
+        )
+    except BadDsn:
+        # Error tracking is optional — a malformed DSN (e.g. an inline comment
+        # in the env file taken as the value) must not stop the API booting.
+        log.error("SENTRY_DSN is invalid; error tracking disabled")
 
 
 @asynccontextmanager
