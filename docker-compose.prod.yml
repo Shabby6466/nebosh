@@ -86,11 +86,17 @@ services:
     image: chrislusf/seaweedfs:latest
     container_name: nebosh-storage
     restart: unless-stopped
-    command: "server -s3 -dir=/data -s3.port=9000 -ip=minio"
+    # S3 auth is REQUIRED: files.proctoring-alt.com exposes this store publicly
+    # (via the tunnel), so only requests signed with our keys — the backend's
+    # own calls and the presigned links it hands out — may be served.
+    # seaweedfs/s3.json holds the keys and is generated on the server (never
+    # committed); see README "Storage credentials".
+    command: "server -s3 -dir=/data -s3.port=9000 -ip=minio -s3.config=/etc/seaweedfs/s3.json"
     ports:
       - "127.0.0.1:9000:9000"   # S3 API
     volumes:
       - minio_data:/data
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
     networks:
       - backend-net
 

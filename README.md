@@ -160,6 +160,21 @@ for f in db/migrations/*.sql; do
 done
 ```
 
+### Storage credentials
+SeaweedFS is reachable from the internet (files.<domain> via the tunnel), so it
+must require S3 signatures — otherwise anyone can list and download KYC images.
+Generate its identity file from the keys the backend uses, on the server:
+
+```bash
+AK=$(grep '^AWS_ACCESS_KEY_ID=' .env.production | cut -d= -f2-)
+SK=$(grep '^AWS_SECRET_ACCESS_KEY=' .env.production | cut -d= -f2-)
+mkdir -p seaweedfs
+printf '{"identities":[{"name":"nebosh","credentials":[{"accessKey":"%s","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]}]}\n' "$AK" "$SK" > seaweedfs/s3.json
+docker compose -f docker-compose.prod.yml up -d --force-recreate minio
+```
+
+Check: an unsigned `curl https://files.<domain>/<bucket>/` must return 403.
+
 ### Capacity & sizing
 Proctoring is CPU-bound (YOLO + InsightFace + liveness per frame). Measured on an
 8-core M1 Pro, one worker, synthetic frames:

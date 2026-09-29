@@ -14,6 +14,9 @@ backend/yolov8n.onnx.data
 # Env files with secrets/credentials
 backend/.env
 frontend/.env
+.env.production
+.env.production.bak
+seaweedfs/s3.json
 
 # --- Node / frontend ---
 frontend/node_modules/
